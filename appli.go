@@ -11,6 +11,9 @@ import (
         "html/template"
         "strings"
         "strconv"
+        "bufio"
+        "sync"
+        
 
         "golang.org/x/net/context"
         "golang.org/x/oauth2"
@@ -157,100 +160,170 @@ type OccupiedDay struct {
 var OccupiedDaysList = make(map[int][]OccupiedDay)
 
 
+func startHttpServer(wg *sync.WaitGroup) *http.Server {
+
+        // http.Handle("/resources/", http.StripPrefix("/resources/", http.FileServer(http.Dir("resources")))) 
+        // http.HandleFunc("/", handler)
+        // log.Fatal(http.ListenAndServe(":8080", nil))
+
+
+    srv := &http.Server{Addr: ":8080"}
+
+    http.Handle("/resources/", http.StripPrefix("/resources/", http.FileServer(http.Dir("resources")))) 
+    http.HandleFunc("/", handler)
+
+    // http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+    //     io.WriteString(w, "hello world\n")
+    // })
+
+    go func() {
+        defer wg.Done() // let main know we are done cleaning up
+
+        // always returns error. ErrServerClosed on graceful close
+        if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+            // unexpected error. port in use?
+            log.Fatalf("ListenAndServe(): %v", err)
+        }
+    }()
+
+    // returning reference so caller can call Shutdown()
+    return srv
+}
+
+
+func fillOccupiedDaysList(srv *calendar.Service){
+    t := time.Now().Format(time.RFC3339)
+    events, err := srv.Events.List("primary").ShowDeleted(false).
+        SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
+    if err != nil {
+        log.Fatalf("Unable to retrieve next ten of the user's events: %v", err)
+    }
+
+    fmt.Println("Upcoming events:")
+    if len(events.Items) == 0 {
+            fmt.Println("No upcoming events found.")
+    } else {
+        for _, item := range events.Items {
+            startDate := item.Start.Date
+            colorID := item.ColorId
+            colorIdDict := map[string]string{
+                    "11": "red",
+                    "6": "orange",
+                    "":"blue",
+                    "1":"blue",
+                    "2":"blue",
+                    "3":"blue",
+                    "4":"blue",
+                    "5":"blue",
+                    "7":"blue",
+                    "8":"blue",
+                    "9":"blue",
+                    "10":"blue",
+                }
+
+            fmt.Printf("\ncolorID: %v aka %v \n",colorID, colorIdDict[colorID])
+            if startDate == "" {
+                fmt.Printf("Should add all-day events in calendar, on %v ", item.Start.DateTime)
+            }
+            fmt.Printf("%v (%v)\n", item.Summary, startDate)
+
+            var ymd = strings.Split(startDate, "-") 
+            m,_ := strconv.Atoi(ymd[1])
+            d,_ := strconv.Atoi(ymd[2])
+            fmt.Printf("year: %v, month: %v, day: %v ", ymd[0], m, d)
+            
+            OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{d, colorIdDict[colorID]})
+
+            endDate :=item.End.Date
+            if endDate != startDate {
+                var endYmd = strings.Split(endDate, "-") 
+                endM,_ := strconv.Atoi(endYmd[1])
+                endD,_ := strconv.Atoi(endYmd[2])
+                fmt.Printf("ENDDATE: year: %v, month: %v, day: %v ", endYmd[0], endM, endD)
+                
+                if m == endM{
+                    for day := d; day < endD; day ++{
+                        OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{day, colorIdDict[colorID]})
+                    }
+                } else{ // note that this does not work if stay lasts more than 2 months
+                    for day := d; day < 32; day ++{
+                        OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{day, colorIdDict[colorID]})
+                    }
+                    for day := 0; day < endD; day ++{
+                        OccupiedDaysList[endM]= append(OccupiedDaysList[endM], OccupiedDay{day, colorIdDict[colorID]})
+                    }
+                }    
+            }
+            // end foreach items
+        }
+    }
+}
+
+func startServer(srv *calendar.Service){
+    log.Printf("main: starting HTTP server")
+
+    httpServerExitDone := &sync.WaitGroup{}
+
+    httpServerExitDone.Add(1)
+    httpServer := startHttpServer(httpServerExitDone)
+
+    //log.Printf("main: serving for 10 seconds")
+
+        reader := bufio.NewReader(os.Stdin)
+        fmt.Print("Click any key to refresh: ")
+        text, _ := reader.ReadString('\n')
+        fmt.Println(text)
+
+        fmt.Println("REFRESH !")
+
+        fillOccupiedDaysList(srv)
+
+
+        fmt.Print("Click any key to exit the program: ")
+        text, _ = reader.ReadString('\n')
+        fmt.Println(text)
+
+        fmt.Println("Bye bye !")
+
+    log.Printf("main: stopping HTTP server")
+
+    // now close the server gracefully ("shutdown")
+    // timeout could be given with a proper context
+    // (in real world you shouldn't use TODO()).
+    if err := httpServer.Shutdown(context.TODO()); err != nil {
+        panic(err) // failure/timeout shutting down the server gracefully
+    }
+
+    // wait for goroutine started in startHttpServer() to stop
+    httpServerExitDone.Wait()
+
+    log.Printf("main: done. exiting")
+}
+
 
 func main() {
-        b, err := ioutil.ReadFile("credentials.json")
-        if err != nil {
-                log.Fatalf("Unable to read client secret file: %v", err)
-        }
+    //read calendar
+    b, err := ioutil.ReadFile("credentials.json")
+    if err != nil {
+            log.Fatalf("Unable to read client secret file: %v", err)
+    }
 
-        // If modifying these scopes, delete your previously saved token.json.
-        config, err := google.ConfigFromJSON(b, calendar.CalendarReadonlyScope)
-        if err != nil {
-                log.Fatalf("Unable to parse client secret file to config: %v", err)
-        }
-        client := getClient(config)
+    // If modifying these scopes, delete your previously saved token.json.
+    config, err := google.ConfigFromJSON(b, calendar.CalendarReadonlyScope)
+    if err != nil {
+            log.Fatalf("Unable to parse client secret file to config: %v", err)
+    }
+    client := getClient(config)
 
-        srv, err := calendar.New(client)
-        if err != nil {
-                log.Fatalf("Unable to retrieve Calendar client: %v", err)
-        }
+    srv, err := calendar.New(client)
+    if err != nil {
+            log.Fatalf("Unable to retrieve Calendar client: %v", err)
+    }
 
-        t := time.Now().Format(time.RFC3339)
-        events, err := srv.Events.List("primary").ShowDeleted(false).
-                SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
-        if err != nil {
-                log.Fatalf("Unable to retrieve next ten of the user's events: %v", err)
-        }
-        fmt.Println("Upcoming events:")
-        if len(events.Items) == 0 {
-                fmt.Println("No upcoming events found.")
-        } else {
-                
+ 
+    fillOccupiedDaysList(srv)
 
-                for _, item := range events.Items {
-                        startDate := item.Start.Date
-                        colorID := item.ColorId
-                        colorIdDict := map[string]string{
-                                "11": "red",
-                                "6": "orange",
-                                "":"blue",
-                                "1":"blue",
-                                "2":"blue",
-                                "3":"blue",
-                                "4":"blue",
-                                "5":"blue",
-                                "7":"blue",
-                                "8":"blue",
-                                "9":"blue",
-                                "10":"blue",
-                            }
+    // start http server to display calendar
+    startServer(srv)
 
-                        fmt.Printf("\ncolorID: %v aka %v \n",colorID, colorIdDict[colorID])
-                        if startDate == "" {
-                                fmt.Printf("Should add all-day events in calendar, on %v ", item.Start.DateTime)
-                        }
-                        fmt.Printf("%v (%v)\n", item.Summary, startDate)
-
-                        var ymd = strings.Split(startDate, "-") 
-                        m,_ := strconv.Atoi(ymd[1])
-                        d,_ := strconv.Atoi(ymd[2])
-                        fmt.Printf("year: %v, month: %v, day: %v ", ymd[0], m, d)
-                        
-                        OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{d, colorIdDict[colorID]})
-
-                        endDate :=item.End.Date
-                        if endDate != startDate {
-                            var endYmd = strings.Split(endDate, "-") 
-                            endM,_ := strconv.Atoi(endYmd[1])
-                            endD,_ := strconv.Atoi(endYmd[2])
-                            fmt.Printf("ENDDATE: year: %v, month: %v, day: %v ", endYmd[0], endM, endD)
-                            
-                            if m == endM{
-                                for day := d; day < endD; day ++{
-                                    OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{day, colorIdDict[colorID]})
-                                }
-                            } else{ // note that this does not work if stay lasts more than 2 months
-                                for day := d; day < 32; day ++{
-                                    OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{day, colorIdDict[colorID]})
-                                }
-                                for day := 0; day < endD; day ++{
-                                    OccupiedDaysList[endM]= append(OccupiedDaysList[endM], OccupiedDay{day, colorIdDict[colorID]})
-                                }
-                            }    
-                            
-
-                        }
-
-
-
-                        //fmt.Printf(Time.Month)
-                }
-        //fmt.Println()
-        //fmt.Println(OccupiedDaysList)
-
-        http.Handle("/resources/", http.StripPrefix("/resources/", http.FileServer(http.Dir("resources")))) 
-        http.HandleFunc("/", handler)
-        log.Fatal(http.ListenAndServe(":8080", nil))
-        }
 }
