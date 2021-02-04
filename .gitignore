@@ -1,0 +1,5 @@
+appli
+src/
+pkg/
+*credentials.json
+*token.json

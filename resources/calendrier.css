@@ -1,0 +1,29 @@
+.days {
+    border-style: solid;
+    border-width: 3px;
+    border-color: #00d4ce;
+    color:black;
+    width: 210px;
+}
+
+.day {
+	width: 25px;
+	color: black;
+	display: inline-block;
+}
+
+.occupied {
+	color: #808080;
+	border-width: 2px;
+	border-style: solid;
+}
+
+.month{
+	color:#00d4ce;
+	display: inline-block;
+	height: 160px;
+	vertical-align: top;
+
+}
+
+
