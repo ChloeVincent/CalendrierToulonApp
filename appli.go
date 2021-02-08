@@ -160,7 +160,34 @@ type OccupiedDay struct {
 var calendarService  *calendar.Service;
 
 
+func appendODL(OccupiedDaysList map[int][]OccupiedDay, month int, startDay int, endDay int, colorID string) {
+    for day := startDay; day < endDay; day ++{
+        OccupiedDaysList[month]= append(OccupiedDaysList[month], OccupiedDay{day, colorIdDict[colorID]})
+    }
+}
 
+var colorIdDict = map[string]string{
+    "11": "red",
+    "6": "orange",
+    "":"blue",
+    "1":"blue",
+    "2":"green",
+    "3":"blue",
+    "4":"blue",
+    "5":"blue",
+    "7":"blue",
+    "8":"blue",
+    "9":"blue",
+    "10":"blue",
+}
+
+func getYMD(startDate string)(int, int, int){
+    ymd := strings.Split(startDate, "-")
+    y,_ := strconv.Atoi(ymd[0])
+    m,_ := strconv.Atoi(ymd[1])
+    d,_ := strconv.Atoi(ymd[2])
+    return y,m,d
+}
 
 func refreshOccupiedDaysList() map[int][]OccupiedDay {
     OccupiedDaysList := make(map[int][]OccupiedDay)
@@ -177,51 +204,31 @@ func refreshOccupiedDaysList() map[int][]OccupiedDay {
     } else {
         for _, item := range events.Items {
             colorID := item.ColorId
-            colorIdDict := map[string]string{
-                    "11": "red",
-                    "6": "orange",
-                    "":"blue",
-                    "1":"blue",
-                    "2":"blue",
-                    "3":"blue",
-                    "4":"blue",
-                    "5":"blue",
-                    "7":"blue",
-                    "8":"blue",
-                    "9":"blue",
-                    "10":"blue",
-                }
-
+            
             startDate := item.Start.Date
             if startDate == "" {
                 fmt.Printf("**Should add all-day events in calendar, on %v \n", item.Start.DateTime)
             }
             fmt.Printf("# %v (%v)\n", item.Summary, startDate)
 
-            var ymd = strings.Split(startDate, "-") 
-            m,_ := strconv.Atoi(ymd[1])
-            d,_ := strconv.Atoi(ymd[2])            
+            y, m, d := getYMD(startDate)            
             OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{d, colorIdDict[colorID]})
-            fmt.Printf("\tSTART DATE: year: %v, month: %v, day: %v \n", ymd[0], m, d)
+            fmt.Printf("\tSTART DATE: year: %v, month: %v, day: %v \n", y, m, d)
 
             endDate :=item.End.Date
             if endDate != startDate {
-                var endYmd = strings.Split(endDate, "-") 
-                endM,_ := strconv.Atoi(endYmd[1])
-                endD,_ := strconv.Atoi(endYmd[2])
+                endY, endM,endD := getYMD(endDate)
                 fmt.Printf("\tENDDATE: year: %v, month: %v, day: %v \n", endYmd[0], endM, endD)
                 
                 if m == endM{
-                    for day := d; day < endD; day ++{
-                        OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{day, colorIdDict[colorID]})
+                    appendODL(OccupiedDaysList, m, d, endD, colorID)
+                    
+                } else{ 
+                    appendODL(OccupiedDaysList,m, d, 32, colorID)
+                    for month := m+1; month < endM; month ++{
+                        appendODL(OccupiedDaysList, month, 0, 32, colorID)
                     }
-                } else{ // note that this does not work if stay lasts more than 2 months
-                    for day := d; day < 32; day ++{
-                        OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{day, colorIdDict[colorID]})
-                    }
-                    for day := 0; day < endD; day ++{
-                        OccupiedDaysList[endM]= append(OccupiedDaysList[endM], OccupiedDay{day, colorIdDict[colorID]})
-                    }
+                    appendODL(OccupiedDaysList, endM, 0, endD, colorID)
                 }    
             }
 
