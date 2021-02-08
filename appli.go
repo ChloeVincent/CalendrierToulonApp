@@ -11,7 +11,7 @@ import (
         "html/template"
         "strings"
         "strconv"
-        "bufio"
+         "bufio"
         "sync"
         
 
@@ -107,6 +107,7 @@ func getColor(s []OccupiedDay, e int) string {
 
 // Runs server
 func handler(w http.ResponseWriter, r *http.Request) {
+    OccupiedDaysList := refreshOccupiedDaysList()
     //fmt.Fprintf(w, "Hi there, I love %s!", r.URL.Path[1:])
     //fmt.Fprintf(w, "<h1>Agenda Toulon</h1>")
     jan:= Month{"jan","01",31, 4}
@@ -151,49 +152,20 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 
-
 type OccupiedDay struct {  
     DayNumber int
     Color string
 }
 
-var OccupiedDaysList = make(map[int][]OccupiedDay)
+var calendarService  *calendar.Service;
 
 
-func startHttpServer(wg *sync.WaitGroup) *http.Server {
-
-        // http.Handle("/resources/", http.StripPrefix("/resources/", http.FileServer(http.Dir("resources")))) 
-        // http.HandleFunc("/", handler)
-        // log.Fatal(http.ListenAndServe(":8080", nil))
 
 
-    srv := &http.Server{Addr: ":8080"}
-
-    http.Handle("/resources/", http.StripPrefix("/resources/", http.FileServer(http.Dir("resources")))) 
-    http.HandleFunc("/", handler)
-
-    // http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-    //     io.WriteString(w, "hello world\n")
-    // })
-
-    go func() {
-        defer wg.Done() // let main know we are done cleaning up
-
-        // always returns error. ErrServerClosed on graceful close
-        if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-            // unexpected error. port in use?
-            log.Fatalf("ListenAndServe(): %v", err)
-        }
-    }()
-
-    // returning reference so caller can call Shutdown()
-    return srv
-}
-
-
-func fillOccupiedDaysList(srv *calendar.Service){
+func refreshOccupiedDaysList() map[int][]OccupiedDay {
+    OccupiedDaysList := make(map[int][]OccupiedDay)
     t := time.Now().Format(time.RFC3339)
-    events, err := srv.Events.List("primary").ShowDeleted(false).
+    events, err := calendarService.Events.List("primary").ShowDeleted(false).
         SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
     if err != nil {
         log.Fatalf("Unable to retrieve next ten of the user's events: %v", err)
@@ -204,7 +176,6 @@ func fillOccupiedDaysList(srv *calendar.Service){
             fmt.Println("No upcoming events found.")
     } else {
         for _, item := range events.Items {
-            startDate := item.Start.Date
             colorID := item.ColorId
             colorIdDict := map[string]string{
                     "11": "red",
@@ -221,25 +192,24 @@ func fillOccupiedDaysList(srv *calendar.Service){
                     "10":"blue",
                 }
 
-            fmt.Printf("\ncolorID: %v aka %v \n",colorID, colorIdDict[colorID])
+            startDate := item.Start.Date
             if startDate == "" {
-                fmt.Printf("Should add all-day events in calendar, on %v ", item.Start.DateTime)
+                fmt.Printf("**Should add all-day events in calendar, on %v \n", item.Start.DateTime)
             }
-            fmt.Printf("%v (%v)\n", item.Summary, startDate)
+            fmt.Printf("# %v (%v)\n", item.Summary, startDate)
 
             var ymd = strings.Split(startDate, "-") 
             m,_ := strconv.Atoi(ymd[1])
-            d,_ := strconv.Atoi(ymd[2])
-            fmt.Printf("year: %v, month: %v, day: %v ", ymd[0], m, d)
-            
+            d,_ := strconv.Atoi(ymd[2])            
             OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{d, colorIdDict[colorID]})
+            fmt.Printf("\tSTART DATE: year: %v, month: %v, day: %v \n", ymd[0], m, d)
 
             endDate :=item.End.Date
             if endDate != startDate {
                 var endYmd = strings.Split(endDate, "-") 
                 endM,_ := strconv.Atoi(endYmd[1])
                 endD,_ := strconv.Atoi(endYmd[2])
-                fmt.Printf("ENDDATE: year: %v, month: %v, day: %v ", endYmd[0], endM, endD)
+                fmt.Printf("\tENDDATE: year: %v, month: %v, day: %v \n", endYmd[0], endM, endD)
                 
                 if m == endM{
                     for day := d; day < endD; day ++{
@@ -254,37 +224,43 @@ func fillOccupiedDaysList(srv *calendar.Service){
                     }
                 }    
             }
+
+            fmt.Printf("\tcolorID: '%v' aka %v \n",colorID, colorIdDict[colorID])
             // end foreach items
         }
     }
+
+
+    fmt.Println("-------------\nClick any key to exit\n")
+    return(OccupiedDaysList)
 }
 
-func startServer(srv *calendar.Service){
+
+
+
+func startHttpServer(wg *sync.WaitGroup) *http.Server{
     log.Printf("main: starting HTTP server")
 
-    httpServerExitDone := &sync.WaitGroup{}
+    wg.Add(1)
+    httpServer := &http.Server{Addr: ":8080"}
 
-    httpServerExitDone.Add(1)
-    httpServer := startHttpServer(httpServerExitDone)
+    http.Handle("/resources/", http.StripPrefix("/resources/", http.FileServer(http.Dir("resources")))) 
+    http.HandleFunc("/", handler)
 
-    //log.Printf("main: serving for 10 seconds")
+    go func() {
+        defer wg.Done() // let main know we are done cleaning up
 
-        reader := bufio.NewReader(os.Stdin)
-        fmt.Print("Click any key to refresh: ")
-        text, _ := reader.ReadString('\n')
-        fmt.Println(text)
+        // always returns error. ErrServerClosed on graceful close
+        if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
+            // unexpected error. port in use?
+            log.Fatalf("ListenAndServe(): %v", err)
+        }
+    }()
+    return(httpServer)
 
-        fmt.Println("REFRESH !")
+}
 
-        fillOccupiedDaysList(srv)
-
-
-        fmt.Print("Click any key to exit the program: ")
-        text, _ = reader.ReadString('\n')
-        fmt.Println(text)
-
-        fmt.Println("Bye bye !")
-
+func stopHttpServer(wg *sync.WaitGroup, httpServer *http.Server){
     log.Printf("main: stopping HTTP server")
 
     // now close the server gracefully ("shutdown")
@@ -295,7 +271,7 @@ func startServer(srv *calendar.Service){
     }
 
     // wait for goroutine started in startHttpServer() to stop
-    httpServerExitDone.Wait()
+    wg.Wait()
 
     log.Printf("main: done. exiting")
 }
@@ -315,15 +291,19 @@ func main() {
     }
     client := getClient(config)
 
-    srv, err := calendar.New(client)
+    calendarService, err = calendar.New(client)
     if err != nil {
             log.Fatalf("Unable to retrieve Calendar client: %v", err)
     }
-
  
-    fillOccupiedDaysList(srv)
-
+    wg := &sync.WaitGroup{}
     // start http server to display calendar
-    startServer(srv)
+    httpServer := startHttpServer(wg)
+    refreshOccupiedDaysList()
+
+    reader := bufio.NewReader(os.Stdin)
+    reader.ReadString('\n')
+
+    stopHttpServer(wg, httpServer)
 
 }
