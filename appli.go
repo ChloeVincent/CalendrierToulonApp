@@ -218,7 +218,7 @@ func refreshOccupiedDaysList() map[int][]OccupiedDay {
             endDate :=item.End.Date
             if endDate != startDate {
                 endY, endM,endD := getYMD(endDate)
-                fmt.Printf("\tENDDATE: year: %v, month: %v, day: %v \n", endYmd[0], endM, endD)
+                fmt.Printf("\tENDDATE: year: %v, month: %v, day: %v \n", endY, endM, endD)
                 
                 if m == endM{
                     appendODL(OccupiedDaysList, m, d, endD, colorID)
