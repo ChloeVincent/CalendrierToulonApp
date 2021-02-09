@@ -8,7 +8,7 @@
 	<h1>Calendrier Toulon Indivision</h1>
 	<p></p>
 
-{{range $month := .}}
+{{range $month := .Months}}
     <div class="month">
     	{{$month.Name}}	
     	<div class="days">
@@ -26,6 +26,10 @@
 		</div>
     </div>
 {{end}}
+
+{{range $event := .Events }}
+	<p>  {{$event}}</p>
+{{end }}
 
 </body>
 </html>

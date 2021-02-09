@@ -105,10 +105,15 @@ func getColor(s []OccupiedDay, e int) string {
     return ""
 }
 
+type TemplateArgs struct {
+    Months []Month
+    Events []string
+}
+
 
 // Runs server
 func handler(w http.ResponseWriter, r *http.Request) {
-    OccupiedDaysList := refreshOccupiedDaysList()
+    OccupiedDaysList, events := refreshOccupiedDaysList()
     //fmt.Fprintf(w, "Hi there, I love %s!", r.URL.Path[1:])
     //fmt.Fprintf(w, "<h1>Agenda Toulon</h1>")
     jan:= Month{"jan","01",31, 4}
@@ -149,7 +154,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
     }
     t, _ := template.New("template.html").Funcs(fmap).Funcs(fmap2).Funcs(fmap3).ParseFiles("template.html")
 
-    t.Execute(w, months)
+    t.Execute(w, TemplateArgs{months, events})
 }
 
 
@@ -190,8 +195,9 @@ func getYMD(startDate string)(int, int, int){
     return y,m,d
 }
 
-func refreshOccupiedDaysList() map[int][]OccupiedDay {
+func refreshOccupiedDaysList() (map[int][]OccupiedDay, []string) {
     OccupiedDaysList := make(map[int][]OccupiedDay)
+    var EventList []string
     t := time.Now().Format(time.RFC3339)
     events, err := calendarService.Events.List("primary").ShowDeleted(false).
         SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
@@ -234,13 +240,15 @@ func refreshOccupiedDaysList() map[int][]OccupiedDay {
             }
 
             fmt.Printf("\tcolorID: '%v' aka %v \n",colorID, colorIdDict[colorID])
+
+            EventList = append(EventList, "Du "+startDate+" au "+endDate+ " : "+ item.Summary)
             // end foreach items
         }
     }
 
 
     fmt.Println("-------------\nClick Enter to exit\n")
-    return(OccupiedDaysList)
+    return OccupiedDaysList, EventList
 }
 
 
