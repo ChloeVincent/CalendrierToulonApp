@@ -3,6 +3,7 @@ package main
 import (
         "encoding/json"
         "fmt"
+        "io"
         "io/ioutil"
         "log"
         "net/http"
@@ -238,7 +239,7 @@ func refreshOccupiedDaysList() map[int][]OccupiedDay {
     }
 
 
-    fmt.Println("-------------\nClick any key to exit\n")
+    fmt.Println("-------------\nClick Enter to exit\n")
     return(OccupiedDaysList)
 }
 
@@ -286,6 +287,10 @@ func stopHttpServer(wg *sync.WaitGroup, httpServer *http.Server){
 
 func main() {
     //read calendar
+    // file, _ := os.Create("./temp.txt")
+    // writer := bufio.NewWriter(file)
+    // writer.WriteString("STARTING\n" )
+
     b, err := ioutil.ReadFile("credentials.json")
     if err != nil {
             log.Fatalf("Unable to read client secret file: %v", err)
@@ -305,12 +310,29 @@ func main() {
  
     wg := &sync.WaitGroup{}
     // start http server to display calendar
+    //writer.WriteString("start server\n" )
     httpServer := startHttpServer(wg)
+    //writer.WriteString("refresh\n" )
     refreshOccupiedDaysList()
 
+    //writer.WriteString("read line \n" )
     reader := bufio.NewReader(os.Stdin)
-    reader.ReadString('\n')
+    _, err = reader.ReadString('\n')
 
-    stopHttpServer(wg, httpServer)
+    if err == io.EOF {
+        log.Printf("EOF error have occurred\n")
+        time.Sleep(15*time.Minute)
+        //writer.WriteString("EOF \n" )
+        stopHttpServer(wg,httpServer)
+    } else if err != nil {
+        //writer.WriteString("fatal error \n" )
+        log.Fatal(err)
+        stopHttpServer(wg, httpServer)
+    } else {
+        //writer.WriteString("stop server \n" )
+        stopHttpServer(wg, httpServer)
+    }
 
+    // writer.WriteString("END \n" )
+    // writer.Flush()
 }
