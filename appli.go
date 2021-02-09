@@ -110,26 +110,27 @@ type TemplateArgs struct {
     Events []string
 }
 
+var MonthsDefinition = []Month {
+    Month{"jan","01",31, 4},
+    Month{"feb","02", 28, 0},
+    Month{"mar","03",31, 0},
+    Month{"avr","04", 30,3},
+    Month{"may","05", 31,5},
+    Month{"jun","06", 30,1},
+    Month{"jul","07", 31,3},
+    Month{"aug","08", 31,6},
+    Month{"sep","09", 30,2},
+    Month{"oct","10", 31,4},
+    Month{"nov","11", 30,0},
+    Month{"dec","12", 31,2}}
+
 
 // Runs server
 func handler(w http.ResponseWriter, r *http.Request) {
     OccupiedDaysList, events := refreshOccupiedDaysList()
     //fmt.Fprintf(w, "Hi there, I love %s!", r.URL.Path[1:])
     //fmt.Fprintf(w, "<h1>Agenda Toulon</h1>")
-    jan:= Month{"jan","01",31, 4}
-    feb:= Month{"feb","02", 28, 0}
-    mar:= Month{"mar","03",31, 0}
-    avr:= Month{"avr","04", 30,3}
-    may:= Month{"may","05", 31,5}
-    jun:= Month{"jun","06", 30,1}
-    jul:= Month{"jul","07", 31,3}
-    aug:= Month{"aug","08", 31,6}
-    sep:= Month{"sep","09", 30,2}
-    oct:= Month{"oct","10", 31,4}
-    nov:= Month{"nov","11", 30,0}
-    dec:= Month{"dec","12", 31,2}
 
-    months := []Month{jan,feb,mar, avr, may, jun, jul, aug, sep, oct, nov, dec}
     fmap:= template.FuncMap{
         "Iterate": func(count int) []int {
             var i int
@@ -154,7 +155,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
     }
     t, _ := template.New("template.html").Funcs(fmap).Funcs(fmap2).Funcs(fmap3).ParseFiles("template.html")
 
-    t.Execute(w, TemplateArgs{months, events})
+    t.Execute(w, TemplateArgs{MonthsDefinition, events})
 }
 
 
