@@ -158,35 +158,36 @@ func refreshOccupiedDaysList() (map[int][]OccupiedDay, []string) {
             
             startDate := item.Start.Date
             if startDate == "" {
-                fmt.Printf("**Should add all-day events in calendar, on %v \n", item.Start.DateTime)
+                fmt.Printf("**NOT ADDED : on %v\n\tOnly all-day events will appear in calendar\n", item.Start.DateTime)
+            } else{
+	            fmt.Printf("# %v (%v)\n", item.Summary, startDate)
+
+	            y, m, d := getYMD(startDate)            
+	            OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{d, colorIdDict[colorID]})
+	            fmt.Printf("\tSTART DATE: year: %v, month: %v, day: %v \n", y, m, d)
+
+	            endDate :=item.End.Date
+	            if endDate != startDate {
+	                endY, endM,endD := getYMD(endDate)
+	                fmt.Printf("\tENDDATE: year: %v, month: %v, day: %v \n", endY, endM, endD)
+	                
+	                if m == endM{
+	                    appendODL(OccupiedDaysList, m, d, endD, colorID)
+	                    
+	                } else{ 
+	                    appendODL(OccupiedDaysList,m, d, 32, colorID)
+	                    for month := m+1; month < endM; month ++{
+	                        appendODL(OccupiedDaysList, month, 0, 32, colorID)
+	                    }
+	                    appendODL(OccupiedDaysList, endM, 0, endD, colorID)
+	                }    
+	            }
+
+	            fmt.Printf("\tcolorID: '%v' aka %v \n",colorID, colorIdDict[colorID])
+
+	            EventList = append(EventList, "Du "+startDate+" au "+endDate+ " : "+ item.Summary)
+	            // end foreach items
             }
-            fmt.Printf("# %v (%v)\n", item.Summary, startDate)
-
-            y, m, d := getYMD(startDate)            
-            OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{d, colorIdDict[colorID]})
-            fmt.Printf("\tSTART DATE: year: %v, month: %v, day: %v \n", y, m, d)
-
-            endDate :=item.End.Date
-            if endDate != startDate {
-                endY, endM,endD := getYMD(endDate)
-                fmt.Printf("\tENDDATE: year: %v, month: %v, day: %v \n", endY, endM, endD)
-                
-                if m == endM{
-                    appendODL(OccupiedDaysList, m, d, endD, colorID)
-                    
-                } else{ 
-                    appendODL(OccupiedDaysList,m, d, 32, colorID)
-                    for month := m+1; month < endM; month ++{
-                        appendODL(OccupiedDaysList, month, 0, 32, colorID)
-                    }
-                    appendODL(OccupiedDaysList, endM, 0, endD, colorID)
-                }    
-            }
-
-            fmt.Printf("\tcolorID: '%v' aka %v \n",colorID, colorIdDict[colorID])
-
-            EventList = append(EventList, "Du "+startDate+" au "+endDate+ " : "+ item.Summary)
-            // end foreach items
         }
     }
 

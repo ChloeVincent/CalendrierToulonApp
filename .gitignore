@@ -1,4 +1,5 @@
 appli
+appli.exe
 src/
 pkg/
 *credentials.json
