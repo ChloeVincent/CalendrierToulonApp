@@ -14,9 +14,8 @@ import (
         "strconv"
          "bufio"
         "sync"
-        
+        "context"
 
-        "golang.org/x/net/context"
         "golang.org/x/oauth2"
         "golang.org/x/oauth2/google"
         "google.golang.org/api/calendar/v3"
@@ -43,6 +42,7 @@ type TemplateArgs struct {
 
 
 var calendarService  *calendar.Service;
+var ctx context.Context;
 
 var MonthsDefinition = []Month {
     Month{"jan","01",31, 4},
@@ -104,10 +104,32 @@ func getColor(s []OccupiedDay, e int) string {
     return ""
 }
 
+var calendarServiceStarted bool;
+var tokenRequested bool;
 
 // Runs server
 func handler(w http.ResponseWriter, r *http.Request) {
-    OccupiedDaysList, events := refreshOccupiedDaysList()
+
+    if !tokenRequested{
+        getOAuth2Link(w,r)
+        return
+    }
+    if !calendarServiceStarted{
+        startCalendarService(w,r)
+        return
+    }
+
+    if calendarService == nil{
+        log.Fatal("Calendar service was not initialized properly.")
+    }
+
+    OccupiedDaysList := make(map[int][]OccupiedDay)
+    events:= []string{"event1", "event2"}
+    if (ctx != nil){
+        OccupiedDaysList, events = refreshOccupiedDaysList()
+    } else{
+        log.Fatal("The background context was not initialized properly")
+    }
 
     fmap:= template.FuncMap{"Iterate": iterate,
                             "IsOccupied": func(day int, monthStr string) bool {
@@ -160,33 +182,33 @@ func refreshOccupiedDaysList() (map[int][]OccupiedDay, []string) {
             if startDate == "" {
                 fmt.Printf("**NOT ADDED : on %v\n\tOnly all-day events will appear in calendar\n", item.Start.DateTime)
             } else{
-	            fmt.Printf("# %v (%v)\n", item.Summary, startDate)
+                fmt.Printf("# %v (%v)\n", item.Summary, startDate)
 
-	            y, m, d := getYMD(startDate)            
-	            OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{d, colorIdDict[colorID]})
-	            fmt.Printf("\tSTART DATE: year: %v, month: %v, day: %v \n", y, m, d)
+                y, m, d := getYMD(startDate)            
+                OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{d, colorIdDict[colorID]})
+                fmt.Printf("\tSTART DATE: year: %v, month: %v, day: %v \n", y, m, d)
 
-	            endDate :=item.End.Date
-	            if endDate != startDate {
-	                endY, endM,endD := getYMD(endDate)
-	                fmt.Printf("\tENDDATE: year: %v, month: %v, day: %v \n", endY, endM, endD)
-	                
-	                if m == endM{
-	                    appendODL(OccupiedDaysList, m, d, endD, colorID)
-	                    
-	                } else{ 
-	                    appendODL(OccupiedDaysList,m, d, 32, colorID)
-	                    for month := m+1; month < endM; month ++{
-	                        appendODL(OccupiedDaysList, month, 0, 32, colorID)
-	                    }
-	                    appendODL(OccupiedDaysList, endM, 0, endD, colorID)
-	                }    
-	            }
+                endDate :=item.End.Date
+                if endDate != startDate {
+                    endY, endM,endD := getYMD(endDate)
+                    fmt.Printf("\tENDDATE: year: %v, month: %v, day: %v \n", endY, endM, endD)
+                    
+                    if m == endM{
+                        appendODL(OccupiedDaysList, m, d, endD, colorID)
+                        
+                    } else{ 
+                        appendODL(OccupiedDaysList,m, d, 32, colorID)
+                        for month := m+1; month < endM; month ++{
+                            appendODL(OccupiedDaysList, month, 0, 32, colorID)
+                        }
+                        appendODL(OccupiedDaysList, endM, 0, endD, colorID)
+                    }    
+                }
 
-	            fmt.Printf("\tcolorID: '%v' aka %v \n",colorID, colorIdDict[colorID])
+                fmt.Printf("\tcolorID: '%v' aka %v \n",colorID, colorIdDict[colorID])
 
-	            EventList = append(EventList, "Du "+startDate+" au "+endDate+ " : "+ item.Summary)
-	            // end foreach items
+                EventList = append(EventList, "Du "+startDate+" au "+endDate+ " : "+ item.Summary)
+                // end foreach items
             }
         }
     }
@@ -202,10 +224,18 @@ func startHttpServer(wg *sync.WaitGroup) *http.Server{
     log.Printf("main: starting HTTP server")
 
     wg.Add(1)
-    httpServer := &http.Server{Addr: ":8080"}
+    port := os.Getenv("PORT")
+    if port == "" {
+        port = "8080"
+        fmt.Println("PORT environment variable was not defined, so the 8080 port is used instead.")
+    }
+
+    httpServer := &http.Server{Addr: ":"+port}
 
     http.Handle("/resources/", http.StripPrefix("/resources/", http.FileServer(http.Dir("resources")))) 
     http.HandleFunc("/", handler)
+    http.HandleFunc("/startLocalCalendarService/", startLocalCalendarService)
+
 
     go func() {
         defer wg.Done() // let main know we are done cleaning up
@@ -220,13 +250,14 @@ func startHttpServer(wg *sync.WaitGroup) *http.Server{
 
 }
 
+
+
 func stopHttpServer(wg *sync.WaitGroup, httpServer *http.Server){
     log.Printf("main: stopping HTTP server")
 
     // now close the server gracefully ("shutdown")
-    // timeout could be given with a proper context
-    // (in real world you shouldn't use TODO()).
-    if err := httpServer.Shutdown(context.TODO()); err != nil {
+    
+    if err := httpServer.Shutdown(ctx); err != nil {
         panic(err) // failure/timeout shutting down the server gracefully
     }
 
@@ -236,65 +267,138 @@ func stopHttpServer(wg *sync.WaitGroup, httpServer *http.Server){
     log.Printf("main: done. exiting")
 }
 
+var oauth2Config *oauth2.Config;
+
+
+func getOAuth2Link(w http.ResponseWriter, r *http.Request) {
+    redirectURL := os.Getenv("OAUTH2_CALLBACK")
+    if redirectURL == "" {
+            //redirectURL = "https://indivision-toulon.ew.r.appspot.com/getTokenKey/"
+            //redirectURL = "http://localhost:8080/getTokenKey/"
+            redirectURL = "http://localhost:8080/"
+            // note that the redirect url has to change depending on the environment (local test or appengine)
+    }
+
+    oauth2Config = &oauth2.Config{
+        ClientID:     "(redacted).apps.googleusercontent.com",
+        ClientSecret: "(redacted)",
+        RedirectURL:  redirectURL,
+        Scopes:       []string{"https://www.googleapis.com/auth/calendar.events.readonly"},
+        Endpoint:     google.Endpoint,
+    }
+
+    authURL := oauth2Config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+
+        
+    fmt.Fprint(w, "Go to the following link and sign in to your account: \n", authURL)
+    tokenRequested = true
+}
+
+
+func startCalendarService(w http.ResponseWriter, r *http.Request){
+    fmt.Println("Start Calendar Service")
+
+    if r.FormValue("code") == "" {
+        fmt.Fprint(w, "Please reload the page and follow the link provided")
+        tokenRequested = false
+        return
+    }
+
+    var err error
+    
+    var tok *oauth2.Token
+    fmt.Println("About to exchange authorization code for token")
+    if ctx ==nil{
+        fmt.Println("context is nil!")
+    }
+
+    authCode := r.FormValue("code")
+    tok, err = oauth2Config.Exchange(ctx, authCode)
+    if err != nil {
+        fmt.Fprint(w, "Error with authorization code exchange : " +err.Error())
+        fmt.Fprint(w, "\nAuthorization code is : "+authCode)
+        fmt.Fprint(w, "Please reload the page and follow the link provided")
+        tokenRequested = false
+        return
+    }
+    
+    fmt.Println("About to create client")
+    client:= oauth2Config.Client(ctx, tok)
+    fmt.Println("Client created")
+
+    calendarService, err = calendar.New(client)
+    if err != nil {
+            log.Fatalf("Unable to retrieve Calendar client: %v", err)
+            fmt.Fprint(w, "error getting calendar")
+    }
+     fmt.Println("Calendar service started")
+
+    calendarServiceStarted = true
+    http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
 
 
 // Calendar service functions: getClient, getTokenFromWeb, tokenFromFile, saveToken and startCalendarService
 // Retrieve a token, saves the token, then returns the generated client.
 func getClient(config *oauth2.Config) *http.Client {
-        // The file token.json stores the user's access and refresh tokens, and is
-        // created automatically when the authorization flow completes for the first
-        // time.
-        tokFile := "token.json"
-        tok, err := tokenFromFile(tokFile)
-        if err != nil {
-                tok = getTokenFromWeb(config)
-                saveToken(tokFile, tok)
-        }
-        return config.Client(context.Background(), tok)
+    // The file token.json stores the user's access and refresh tokens, and is
+    // created automatically when the authorization flow completes for the first
+    // time.
+    tokFile := "token.json"
+    tok, err := tokenFromFile(tokFile)
+    if err != nil {
+            tok = getTokenFromWeb(config)
+            saveToken(tokFile, tok)
+    }
+    return config.Client(ctx, tok)
 }
 
 // Request a token from the web, then returns the retrieved token.
 func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
-        authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-        fmt.Printf("Go to the following link in your browser then type the "+
-                "authorization code: \n%v\n", authURL)
+    authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+    fmt.Printf("Go to the following link in your browser then type the "+
+        "authorization code: \n%v\n", authURL)
 
-        var authCode string
-        if _, err := fmt.Scan(&authCode); err != nil {
-                log.Fatalf("Unable to read authorization code: %v", err)
-        }
+    var authCode string
+    if _, err := fmt.Scan(&authCode); err != nil {
+        log.Fatalf("Unable to read authorization code: %v", err)
+    }
 
-        tok, err := config.Exchange(context.TODO(), authCode)
-        if err != nil {
-                log.Fatalf("Unable to retrieve token from web: %v", err)
-        }
-        return tok
+    tok, err := config.Exchange(ctx, authCode)
+    if err != nil {
+        log.Fatalf("Unable to retrieve token from web: %v", err)
+    }
+    return tok
 }
+
 
 // Retrieves a token from a local file.
 func tokenFromFile(file string) (*oauth2.Token, error) {
-        f, err := os.Open(file)
-        if err != nil {
-                return nil, err
-        }
-        defer f.Close()
-        tok := &oauth2.Token{}
-        err = json.NewDecoder(f).Decode(tok)
-        return tok, err
+    f, err := os.Open(file)
+    if err != nil {
+        return nil, err
+    }
+    defer f.Close()
+    tok := &oauth2.Token{}
+    err = json.NewDecoder(f).Decode(tok)
+    return tok, err
 }
 
 // Saves a token to a file path.
 func saveToken(path string, token *oauth2.Token) {
-        fmt.Printf("Saving credential file to: %s\n", path)
-        f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
-        if err != nil {
-                log.Fatalf("Unable to cache oauth token: %v", err)
-        }
-        defer f.Close()
-        json.NewEncoder(f).Encode(token)
+    fmt.Printf("Saving credential file to: %s\n", path)
+    f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+    if err != nil {
+        log.Fatalf("Unable to cache oauth token: %v", err)
+    }
+    defer f.Close()
+    json.NewEncoder(f).Encode(token)
 }
 
-func startCalendarService(){
+
+func startLocalCalendarService(w http.ResponseWriter,r *http.Request){
+
     b, err := ioutil.ReadFile("credentials.json")
     if err != nil {
             log.Fatalf("Unable to read client secret file: %v", err)
@@ -305,38 +409,43 @@ func startCalendarService(){
     if err != nil {
             log.Fatalf("Unable to parse client secret file to config: %v", err)
     }
+
     client := getClient(config)
 
     calendarService, err = calendar.New(client)
     if err != nil {
             log.Fatalf("Unable to retrieve Calendar client: %v", err)
     }
+
+    tokenRequested = true
+    calendarServiceStarted = true
+   	http.Redirect(w, r, "/", http.StatusSeeOther)
+
 }
 
-
-
 func main() {
+    ctx = context.Background()
     //read calendar
     // file, _ := os.Create("./temp.txt")
     // writer := bufio.NewWriter(file)
     // writer.WriteString("STARTING\n" )
 
-    startCalendarService()
+    calendarServiceStarted =false
+    tokenRequested =false
  
     wg := &sync.WaitGroup{}
     // start http server to display calendar
     //writer.WriteString("start server\n" )
     httpServer := startHttpServer(wg)
     //writer.WriteString("refresh\n" )
-    refreshOccupiedDaysList()
-
+    
     //writer.WriteString("read line \n" )
     reader := bufio.NewReader(os.Stdin)
     _, err := reader.ReadString('\n')
 
     if err == io.EOF {
         log.Printf("EOF error have occurred\n")
-        time.Sleep(15*time.Minute)
+        time.Sleep(2*time.Minute)
         //writer.WriteString("EOF \n" )
         
     } else if err != nil {

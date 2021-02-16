@@ -4,3 +4,7 @@ src/
 pkg/
 *credentials.json
 *token.json
+oauth2Credentials.txt
+client_secret*
+go.sum
+logo.png
