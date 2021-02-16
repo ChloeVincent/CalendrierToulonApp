@@ -1,8 +1,8 @@
-module example.com/m
+module indivision-toulon.appspot.com
 
 go 1.15
 
 require (
-	golang.org/x/oauth2 v0.0.0-20210210192628-66670185b0cd // indirect
-	google.golang.org/api v0.40.0 // indirect
+	golang.org/x/oauth2 v0.0.0-20210210192628-66670185b0cd
+	google.golang.org/api v0.40.0
 )

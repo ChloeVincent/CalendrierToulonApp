@@ -6,5 +6,6 @@ pkg/
 *token.json
 oauth2Credentials.txt
 client_secret*
+credentialsConst.go
 go.sum
 logo.png

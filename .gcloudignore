@@ -43,3 +43,6 @@ client_secret*
 # extra files
 logo.png
 go.sum
+
+# for local tests only/ desktop app
+startLocalCalendarService.go

@@ -1,10 +1,8 @@
 package main
 
 import (
-        "encoding/json"
         "fmt"
         "io"
-        "io/ioutil"
         "log"
         "net/http"
         "os"
@@ -12,15 +10,13 @@ import (
         "html/template"
         "strings"
         "strconv"
-         "bufio"
+        "bufio"
         "sync"
         "context"
 
         "golang.org/x/oauth2"
-        "golang.org/x/oauth2/google"
         "google.golang.org/api/calendar/v3"
 )
-
 
 type OccupiedDay struct {  
     DayNumber int
@@ -110,13 +106,19 @@ var tokenRequested bool;
 // Runs server
 func handler(w http.ResponseWriter, r *http.Request) {
 
-    if !tokenRequested{
-        getOAuth2Link(w,r)
-        return
-    }
-    if !calendarServiceStarted{
-        startCalendarService(w,r)
-        return
+    if(!isLocal){
+        if !tokenRequested{
+            getOAuth2Link(w,r)
+            return
+        }
+        if !calendarServiceStarted{
+            startCalendarService(w,r)
+            return
+        }   
+    } else{
+        if !calendarServiceStarted {
+            startCalendarService(w,r)
+        }
     }
 
     if calendarService == nil{
@@ -234,8 +236,6 @@ func startHttpServer(wg *sync.WaitGroup) *http.Server{
 
     http.Handle("/resources/", http.StripPrefix("/resources/", http.FileServer(http.Dir("resources")))) 
     http.HandleFunc("/", handler)
-    http.HandleFunc("/startLocalCalendarService/", startLocalCalendarService)
-
 
     go func() {
         defer wg.Done() // let main know we are done cleaning up
@@ -270,159 +270,6 @@ func stopHttpServer(wg *sync.WaitGroup, httpServer *http.Server){
 var oauth2Config *oauth2.Config;
 
 
-func getOAuth2Link(w http.ResponseWriter, r *http.Request) {
-    redirectURL := os.Getenv("OAUTH2_CALLBACK")
-    if redirectURL == "" {
-            //redirectURL = "https://indivision-toulon.ew.r.appspot.com/getTokenKey/"
-            //redirectURL = "http://localhost:8080/getTokenKey/"
-            redirectURL = "http://localhost:8080/"
-            // note that the redirect url has to change depending on the environment (local test or appengine)
-    }
-
-    oauth2Config = &oauth2.Config{
-        ClientID:     "(redacted).apps.googleusercontent.com",
-        ClientSecret: "(redacted)",
-        RedirectURL:  redirectURL,
-        Scopes:       []string{"https://www.googleapis.com/auth/calendar.events.readonly"},
-        Endpoint:     google.Endpoint,
-    }
-
-    authURL := oauth2Config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-
-        
-    fmt.Fprint(w, "Go to the following link and sign in to your account: \n", authURL)
-    tokenRequested = true
-}
-
-
-func startCalendarService(w http.ResponseWriter, r *http.Request){
-    fmt.Println("Start Calendar Service")
-
-    if r.FormValue("code") == "" {
-        fmt.Fprint(w, "Please reload the page and follow the link provided")
-        tokenRequested = false
-        return
-    }
-
-    var err error
-    
-    var tok *oauth2.Token
-    fmt.Println("About to exchange authorization code for token")
-    if ctx ==nil{
-        fmt.Println("context is nil!")
-    }
-
-    authCode := r.FormValue("code")
-    tok, err = oauth2Config.Exchange(ctx, authCode)
-    if err != nil {
-        fmt.Fprint(w, "Error with authorization code exchange : " +err.Error())
-        fmt.Fprint(w, "\nAuthorization code is : "+authCode)
-        fmt.Fprint(w, "Please reload the page and follow the link provided")
-        tokenRequested = false
-        return
-    }
-    
-    fmt.Println("About to create client")
-    client:= oauth2Config.Client(ctx, tok)
-    fmt.Println("Client created")
-
-    calendarService, err = calendar.New(client)
-    if err != nil {
-            log.Fatalf("Unable to retrieve Calendar client: %v", err)
-            fmt.Fprint(w, "error getting calendar")
-    }
-     fmt.Println("Calendar service started")
-
-    calendarServiceStarted = true
-    http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
-
-
-// Calendar service functions: getClient, getTokenFromWeb, tokenFromFile, saveToken and startCalendarService
-// Retrieve a token, saves the token, then returns the generated client.
-func getClient(config *oauth2.Config) *http.Client {
-    // The file token.json stores the user's access and refresh tokens, and is
-    // created automatically when the authorization flow completes for the first
-    // time.
-    tokFile := "token.json"
-    tok, err := tokenFromFile(tokFile)
-    if err != nil {
-            tok = getTokenFromWeb(config)
-            saveToken(tokFile, tok)
-    }
-    return config.Client(ctx, tok)
-}
-
-// Request a token from the web, then returns the retrieved token.
-func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
-    authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-    fmt.Printf("Go to the following link in your browser then type the "+
-        "authorization code: \n%v\n", authURL)
-
-    var authCode string
-    if _, err := fmt.Scan(&authCode); err != nil {
-        log.Fatalf("Unable to read authorization code: %v", err)
-    }
-
-    tok, err := config.Exchange(ctx, authCode)
-    if err != nil {
-        log.Fatalf("Unable to retrieve token from web: %v", err)
-    }
-    return tok
-}
-
-
-// Retrieves a token from a local file.
-func tokenFromFile(file string) (*oauth2.Token, error) {
-    f, err := os.Open(file)
-    if err != nil {
-        return nil, err
-    }
-    defer f.Close()
-    tok := &oauth2.Token{}
-    err = json.NewDecoder(f).Decode(tok)
-    return tok, err
-}
-
-// Saves a token to a file path.
-func saveToken(path string, token *oauth2.Token) {
-    fmt.Printf("Saving credential file to: %s\n", path)
-    f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
-    if err != nil {
-        log.Fatalf("Unable to cache oauth token: %v", err)
-    }
-    defer f.Close()
-    json.NewEncoder(f).Encode(token)
-}
-
-
-func startLocalCalendarService(w http.ResponseWriter,r *http.Request){
-
-    b, err := ioutil.ReadFile("credentials.json")
-    if err != nil {
-            log.Fatalf("Unable to read client secret file: %v", err)
-    }
-
-    // If modifying these scopes, delete your previously saved token.json.
-    config, err := google.ConfigFromJSON(b, calendar.CalendarReadonlyScope)
-    if err != nil {
-            log.Fatalf("Unable to parse client secret file to config: %v", err)
-    }
-
-    client := getClient(config)
-
-    calendarService, err = calendar.New(client)
-    if err != nil {
-            log.Fatalf("Unable to retrieve Calendar client: %v", err)
-    }
-
-    tokenRequested = true
-    calendarServiceStarted = true
-   	http.Redirect(w, r, "/", http.StatusSeeOther)
-
-}
-
 func main() {
     ctx = context.Background()
     //read calendar
@@ -440,6 +287,9 @@ func main() {
     //writer.WriteString("refresh\n" )
     
     //writer.WriteString("read line \n" )
+
+    // TO retrieve token on first connect you need to comment the following lines
+    // keeping only the time.Sleep
     reader := bufio.NewReader(os.Stdin)
     _, err := reader.ReadString('\n')
 
