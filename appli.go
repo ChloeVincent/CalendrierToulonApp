@@ -13,6 +13,7 @@ import (
         "bufio"
         "sync"
         "context"
+        "math/rand"
 
         "golang.org/x/oauth2"
         "google.golang.org/api/calendar/v3"
@@ -28,17 +29,12 @@ type Month struct {
     Index string
     Days  int
     StartDay int
-    //OccupiedDays []int
 }
 
 type TemplateArgs struct {
     Months []Month
     Events []string
 }
-
-
-var calendarService  *calendar.Service;
-var ctx context.Context;
 
 var MonthsDefinition = []Month {
     Month{"jan","01",31, 4},
@@ -69,7 +65,6 @@ var colorIdDict = map[string]string{
     "10":"blue",
 }
 
-
 // Handler functions: iterate, contains and getColor
 func iterate(count int) []int {
     var i int
@@ -82,7 +77,6 @@ func iterate(count int) []int {
 
 func contains(s []OccupiedDay, e int) bool {
     for _, a := range s {
-        //fmt.Printf("a: %v ; e: %v", a, e)
         if a.DayNumber == e {
             return true
         }
@@ -92,7 +86,6 @@ func contains(s []OccupiedDay, e int) bool {
 
 func getColor(s []OccupiedDay, e int) string {
     for _, a := range s {
-        //fmt.Printf("a: %v ; e: %v", a, e)
         if a.DayNumber == e {
             return a.Color
         }
@@ -100,26 +93,17 @@ func getColor(s []OccupiedDay, e int) string {
     return ""
 }
 
-var calendarServiceStarted bool;
-var tokenRequested bool;
 
 // Runs server
 func handler(w http.ResponseWriter, r *http.Request) {
-
-    if(!isLocal){
-        if !tokenRequested{
-            getOAuth2Link(w,r)
-            return
-        }
-        if !calendarServiceStarted{
-            startCalendarService(w,r)
-            return
-        }   
-    } else{
-        if !calendarServiceStarted {
-            startCalendarService(w,r)
-        }
+    token := getLocalToken(w,r)
+    if token == nil{
+        fmt.Println("No token was found, redirecting to login")
+        http.Redirect(w, r, "/login/", http.StatusSeeOther)
+        return
     }
+    var calendarService  *calendar.Service;
+    calendarService = startCalendarService(token)
 
     if calendarService == nil{
         log.Fatal("Calendar service was not initialized properly.")
@@ -127,11 +111,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
     OccupiedDaysList := make(map[int][]OccupiedDay)
     events:= []string{"event1", "event2"}
-    if (ctx != nil){
-        OccupiedDaysList, events = refreshOccupiedDaysList()
-    } else{
-        log.Fatal("The background context was not initialized properly")
-    }
+
+    OccupiedDaysList, events = refreshOccupiedDaysList(calendarService)
 
     fmap:= template.FuncMap{"Iterate": iterate,
                             "IsOccupied": func(day int, monthStr string) bool {
@@ -163,7 +144,7 @@ func appendODL(OccupiedDaysList map[int][]OccupiedDay, month int, startDay int, 
     }
 }
 
-func refreshOccupiedDaysList() (map[int][]OccupiedDay, []string) {
+func refreshOccupiedDaysList(calendarService  *calendar.Service) (map[int][]OccupiedDay, []string) {
     OccupiedDaysList := make(map[int][]OccupiedDay)
     var EventList []string
     t := time.Now().Format(time.RFC3339)
@@ -220,7 +201,6 @@ func refreshOccupiedDaysList() (map[int][]OccupiedDay, []string) {
 }
 
 
-
 // start and stop Http server
 func startHttpServer(wg *sync.WaitGroup) *http.Server{
     log.Printf("main: starting HTTP server")
@@ -236,6 +216,9 @@ func startHttpServer(wg *sync.WaitGroup) *http.Server{
 
     http.Handle("/resources/", http.StripPrefix("/resources/", http.FileServer(http.Dir("resources")))) 
     http.HandleFunc("/", handler)
+    http.HandleFunc("/login/", loginHandler)
+    http.HandleFunc("/oauth2CallBack/", oauth2CallBackHandler)
+
 
     go func() {
         defer wg.Done() // let main know we are done cleaning up
@@ -252,7 +235,7 @@ func startHttpServer(wg *sync.WaitGroup) *http.Server{
 
 
 
-func stopHttpServer(wg *sync.WaitGroup, httpServer *http.Server){
+func stopHttpServer(wg *sync.WaitGroup, httpServer *http.Server, ctx context.Context){
     log.Printf("main: stopping HTTP server")
 
     // now close the server gracefully ("shutdown")
@@ -268,42 +251,36 @@ func stopHttpServer(wg *sync.WaitGroup, httpServer *http.Server){
 }
 
 var oauth2Config *oauth2.Config;
+var tokenCookies map[string]*oauth2.Token;
+var stateString string;
+
+func initializeStateString(){
+    stateString = strconv.FormatInt(rand.Int63(),10)
+}
 
 
 func main() {
-    ctx = context.Background()
-    //read calendar
-    // file, _ := os.Create("./temp.txt")
-    // writer := bufio.NewWriter(file)
-    // writer.WriteString("STARTING\n" )
-
-    calendarServiceStarted =false
-    tokenRequested =false
- 
-    wg := &sync.WaitGroup{}
-    // start http server to display calendar
-    //writer.WriteString("start server\n" )
-    httpServer := startHttpServer(wg)
-    //writer.WriteString("refresh\n" )
+    ctx := context.Background()
     
-    //writer.WriteString("read line \n" )
+    initializeConfig()
+    initializeStateString()
+    tokenCookies = make(map[string]*oauth2.Token)
 
-    // TO retrieve token on first connect you need to comment the following lines
-    // keeping only the time.Sleep
+    wg := &sync.WaitGroup{}
+    // start http server
+    httpServer := startHttpServer(wg)
+
+    // To retrieve token from web on first local connect you need to comment the following lines
+    // keeping only the time.Sleep ...
     reader := bufio.NewReader(os.Stdin)
     _, err := reader.ReadString('\n')
 
     if err == io.EOF {
         log.Printf("EOF error have occurred\n")
-        time.Sleep(2*time.Minute)
-        //writer.WriteString("EOF \n" )
-        
+        time.Sleep(2*time.Minute)        
     } else if err != nil {
-        //writer.WriteString("fatal error \n" )
         log.Fatal(err)
     } 
-    
-    stopHttpServer(wg,httpServer)
-    // writer.WriteString("END \n" )
-    // writer.Flush()
+
+      stopHttpServer(wg,httpServer, ctx)
 }

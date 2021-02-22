@@ -7,49 +7,24 @@ import (
         "log"
         "net/http"
         "os"
+        "context"
 
         "golang.org/x/oauth2"
         "golang.org/x/oauth2/google"
         "google.golang.org/api/calendar/v3"
 )
 
-const isLocal = true;
-
-func getOAuth2Link(w http.ResponseWriter, r *http.Request) {
-    //this function is needed to build
-}
-
-// Calendar service functions: getClient, getTokenFromWeb, tokenFromFile, saveToken and startCalendarService
-// Retrieve a token, saves the token, then returns the generated client.
-func getClient(config *oauth2.Config) *http.Client {
-    // The file token.json stores the user's access and refresh tokens, and is
-    // created automatically when the authorization flow completes for the first
-    // time.
-    tokFile := "token.json"
-    tok, err := tokenFromFile(tokFile)
+func initializeConfig(){
+    b, err := ioutil.ReadFile("credentials.json")
     if err != nil {
-            tok = getTokenFromWeb(config)
-            saveToken(tokFile, tok)
+        log.Fatalf("Unable to read client secret file: %v", err)
     }
-    return config.Client(ctx, tok)
-}
 
-// Request a token from the web, then returns the retrieved token.
-func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
-    authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-    fmt.Printf("Go to the following link in your browser then type the "+
-        "authorization code: \n%v\n\nYou probably need to comment some lines in the main() ", authURL)
-
-    var authCode string
-    if _, err := fmt.Scan(&authCode); err != nil {
-        log.Fatalf("Unable to read authorization code: %v", err)
-    }
-    log.Printf("about to exchange")
-    tok, err := config.Exchange(ctx, authCode)
+    // If modifying these scopes, delete your previously saved token.json.
+    oauth2Config, err = google.ConfigFromJSON(b, calendar.CalendarReadonlyScope)
     if err != nil {
-        log.Fatalf("Unable to retrieve token from web: %v", err)
+        log.Fatalf("Unable to parse client secret file to config: %v", err)
     }
-    return tok
 }
 
 
@@ -65,6 +40,27 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
     return tok, err
 }
 
+// Request a token from the web, then returns the retrieved token.
+func getTokenFromWeb() *oauth2.Token {
+    authURL := oauth2Config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+    fmt.Printf("Go to the following link in your browser then type the "+
+        "authorization code: \n%v\n\nNote that you probably need to comment some lines in the main()\n\n"+
+        "Authorization code:", authURL)
+
+    var authCode string
+    if _, err := fmt.Scan(&authCode); err != nil {
+        fmt.Printf("\nUnable to read authorization code: %v\n", err)
+        return nil
+    }
+    log.Printf("about to exchange")
+    tok, err := oauth2Config.Exchange(context.Background(), authCode)
+    if err != nil {
+        fmt.Printf("\nUnable to retrieve token from web: %v\n", err)
+        return nil
+    }
+    return tok
+}
+
 // Saves a token to a file path.
 func saveToken(path string, token *oauth2.Token) {
     fmt.Printf("Saving credential file to: %s\n", path)
@@ -76,29 +72,42 @@ func saveToken(path string, token *oauth2.Token) {
     json.NewEncoder(f).Encode(token)
 }
 
-
-
-func startCalendarService(w http.ResponseWriter,r *http.Request){
-
-    b, err := ioutil.ReadFile("credentials.json")
+func getLocalToken(w http.ResponseWriter, r *http.Request) *oauth2.Token {
+    // The file token.json stores the user's access and refresh tokens, and is
+    // created automatically when the authorization flow completes for the first
+    // time.
+    tokFile := "token.json"
+    tok, err := tokenFromFile(tokFile)
     if err != nil {
-            log.Fatalf("Unable to read client secret file: %v", err)
+            tok = getTokenFromWeb()
+            if tok != nil{
+                saveToken(tokFile, tok)
+            }
     }
+    return tok
+}
 
-    // If modifying these scopes, delete your previously saved token.json.
-    config, err := google.ConfigFromJSON(b, calendar.CalendarReadonlyScope)
-    if err != nil {
-            log.Fatalf("Unable to parse client secret file to config: %v", err)
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+    if getLocalToken(w,r) != nil {
+        fmt.Println("Already logged in : a cookie exists for this user")
+        http.Redirect(w, r, "/", http.StatusSeeOther)
+    } else {
+        fmt.Fprint(w, "There was an error, could not get token")
+        return
     }
+}
 
-    client := getClient(config)
+func oauth2CallBackHandler(w http.ResponseWriter, r *http.Request) {
+    http.Redirect(w, r, "/", http.StatusSeeOther)
+}
 
-    calendarService, err = calendar.New(client)
+func startCalendarService(token *oauth2.Token) *calendar.Service {
+    ctx := context.Background()
+    client := oauth2Config.Client(ctx, token)
+
+    calendarService, err := calendar.New(client)
     if err != nil {
             log.Fatalf("Unable to retrieve Calendar client: %v", err)
     }
-
-    tokenRequested = true
-    calendarServiceStarted = true
-    http.Redirect(w, r, "/", http.StatusSeeOther)
+    return calendarService
 }
