@@ -14,17 +14,20 @@ import (
         "google.golang.org/api/calendar/v3"
 )
 
-func initializeConfig(){
+// initializer function to avoid changes on what should be a constant
+// (if it was possible in go)
+func getConfig() *oauth2.Config{
     b, err := ioutil.ReadFile("credentials.json")
     if err != nil {
         log.Fatalf("Unable to read client secret file: %v", err)
     }
 
     // If modifying these scopes, delete your previously saved token.json.
-    oauth2Config, err = google.ConfigFromJSON(b, calendar.CalendarReadonlyScope)
+    oauth2Config, err := google.ConfigFromJSON(b, calendar.CalendarReadonlyScope)
     if err != nil {
         log.Fatalf("Unable to parse client secret file to config: %v", err)
     }
+    return oauth2Config
 }
 
 
@@ -42,6 +45,7 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
 
 // Request a token from the web, then returns the retrieved token.
 func getTokenFromWeb() *oauth2.Token {
+    oauth2Config := getConfig()
     authURL := oauth2Config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
     fmt.Printf("Go to the following link in your browser then type the "+
         "authorization code: \n%v\n\nNote that you probably need to comment some lines in the main()\n\n"+
@@ -103,7 +107,7 @@ func oauth2CallBackHandler(w http.ResponseWriter, r *http.Request) {
 
 func startCalendarService(token *oauth2.Token) *calendar.Service {
     ctx := context.Background()
-    client := oauth2Config.Client(ctx, token)
+    client := getConfig().Client(ctx, token)
 
     calendarService, err := calendar.New(client)
     if err != nil {

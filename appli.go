@@ -13,16 +13,9 @@ import (
         "bufio"
         "sync"
         "context"
-        "math/rand"
 
-        "golang.org/x/oauth2"
         "google.golang.org/api/calendar/v3"
 )
-
-type OccupiedDay struct {  
-    DayNumber int
-    Color string
-}
 
 type Month struct {  
     Name string
@@ -31,38 +24,58 @@ type Month struct {
     StartDay int
 }
 
+type OccupiedPeriod struct {
+    Month int
+    StartDay int
+    EndDay int
+    ColorId string
+}
+
+type OccupiedDay struct {  
+    DayNumber int
+    Color string
+}
+
 type TemplateArgs struct {
     Months []Month
     Events []string
 }
 
-var MonthsDefinition = []Month {
-    Month{"jan","01",31, 4},
-    Month{"feb","02", 28, 0},
-    Month{"mar","03",31, 0},
-    Month{"avr","04", 30,3},
-    Month{"may","05", 31,5},
-    Month{"jun","06", 30,1},
-    Month{"jul","07", 31,3},
-    Month{"aug","08", 31,6},
-    Month{"sep","09", 30,2},
-    Month{"oct","10", 31,4},
-    Month{"nov","11", 30,0},
-    Month{"dec","12", 31,2}}
+// initializer function to avoid changes on what should be a constant array
+// (if it existed in go)
+func getAllMonths() []Month {
+    return []Month {
+        Month{"jan","01",31, 4},
+        Month{"feb","02", 28, 0},
+        Month{"mar","03",31, 0},
+        Month{"avr","04", 30,3},
+        Month{"may","05", 31,5},
+        Month{"jun","06", 30,1},
+        Month{"jul","07", 31,3},
+        Month{"aug","08", 31,6},
+        Month{"sep","09", 30,2},
+        Month{"oct","10", 31,4},
+        Month{"nov","11", 30,0},
+        Month{"dec","12", 31,2}}
+}
 
-var colorIdDict = map[string]string{
-    "11": "red",
-    "6": "orange",
-    "":"blue",
-    "1":"blue",
-    "2":"green",
-    "3":"blue",
-    "4":"blue",
-    "5":"blue",
-    "7":"blue",
-    "8":"blue",
-    "9":"blue",
-    "10":"blue",
+// initializer function to avoid changes on what should be a constant array
+// (if it existed in go)
+func getColorIdDict() map[string]string {
+    return map[string]string{
+        "11": "red",
+        "6": "orange",
+        "":"blue",
+        "1":"blue",
+        "2":"green",
+        "3":"blue",
+        "4":"blue",
+        "5":"blue",
+        "7":"blue",
+        "8":"blue",
+        "9":"blue",
+        "10":"blue",
+    }
 }
 
 // Handler functions: iterate, contains and getColor
@@ -108,11 +121,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
     if calendarService == nil{
         log.Fatal("Calendar service was not initialized properly.")
     }
-
-    OccupiedDaysList := make(map[int][]OccupiedDay)
-    events:= []string{"event1", "event2"}
-
-    OccupiedDaysList, events = refreshOccupiedDaysList(calendarService)
+    OccupiedDaysList, events := refreshOccupiedDaysList(calendarService)
 
     fmap:= template.FuncMap{"Iterate": iterate,
                             "IsOccupied": func(day int, monthStr string) bool {
@@ -125,7 +134,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
     
     t, _ := template.New("template.html").Funcs(fmap).ParseFiles("template.html")
 
-    t.Execute(w, TemplateArgs{MonthsDefinition, events})
+    t.Execute(w, TemplateArgs{getAllMonths(), events})
 }
 
 
@@ -138,9 +147,9 @@ func getYMD(startDate string)(int, int, int){
     return y,m,d
 }
 
-func appendODL(OccupiedDaysList map[int][]OccupiedDay, month int, startDay int, endDay int, colorID string) {
-    for day := startDay; day < endDay; day ++{
-        OccupiedDaysList[month]= append(OccupiedDaysList[month], OccupiedDay{day, colorIdDict[colorID]})
+func appendODL(OccupiedDaysList map[int][]OccupiedDay, period OccupiedPeriod) {
+    for day := period.StartDay; day < period.EndDay; day ++{
+        OccupiedDaysList[period.Month]= append(OccupiedDaysList[period.Month], OccupiedDay{day, getColorIdDict()[period.ColorId]})
     }
 }
 
@@ -158,6 +167,7 @@ func refreshOccupiedDaysList(calendarService  *calendar.Service) (map[int][]Occu
     if len(events.Items) == 0 {
             fmt.Println("No upcoming events found.")
     } else {
+        colorIdDict := getColorIdDict()
         for _, item := range events.Items {
             colorID := item.ColorId
             
@@ -177,14 +187,14 @@ func refreshOccupiedDaysList(calendarService  *calendar.Service) (map[int][]Occu
                     fmt.Printf("\tENDDATE: year: %v, month: %v, day: %v \n", endY, endM, endD)
                     
                     if m == endM{
-                        appendODL(OccupiedDaysList, m, d, endD, colorID)
+                        appendODL(OccupiedDaysList, OccupiedPeriod{m, d, endD, colorID})
                         
                     } else{ 
-                        appendODL(OccupiedDaysList,m, d, 32, colorID)
+                        appendODL(OccupiedDaysList,OccupiedPeriod{m, d, 32, colorID})
                         for month := m+1; month < endM; month ++{
-                            appendODL(OccupiedDaysList, month, 0, 32, colorID)
+                            appendODL(OccupiedDaysList, OccupiedPeriod{month, 0, 32, colorID})
                         }
-                        appendODL(OccupiedDaysList, endM, 0, endD, colorID)
+                        appendODL(OccupiedDaysList, OccupiedPeriod{endM, 0, endD, colorID})
                     }    
                 }
 
@@ -250,21 +260,9 @@ func stopHttpServer(wg *sync.WaitGroup, httpServer *http.Server, ctx context.Con
     log.Printf("main: done. exiting")
 }
 
-var oauth2Config *oauth2.Config;
-var tokenCookies map[string]*oauth2.Token;
-var stateString string;
-
-func initializeStateString(){
-    stateString = strconv.FormatInt(rand.Int63(),10)
-}
-
-
 func main() {
     ctx := context.Background()
     
-    initializeConfig()
-    initializeStateString()
-    tokenCookies = make(map[string]*oauth2.Token)
 
     wg := &sync.WaitGroup{}
     // start http server

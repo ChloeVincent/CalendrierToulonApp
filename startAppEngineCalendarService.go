@@ -15,14 +15,33 @@ import (
         "google.golang.org/api/calendar/v3"
 )
 
-func initializeConfig(){
+var (
+    tokenCookies map[string]*oauth2.Token;
+    stateString string;
+)
+
+func getStateString(updateString bool) string{
+    if updateString {
+        stateString = strconv.FormatInt(rand.Int63(),10)
+    }
+    return stateString
+}
+
+func init(){
+    tokenCookies = make(map[string]*oauth2.Token)
+}
+
+
+// initializer function to avoid changes on what should be a constant
+// (if it was possible in go)
+func getConfig() *oauth2.Config{
     //redirectURL:= "https://indivision-toulon.ew.r.appspot.com/oauth2CallBack/"
     redirectURL := "http://localhost:8080/oauth2CallBack/"
     // note that the redirect url has to change depending on the environment (local test or appengine)
 
     //CLIENT_ID and CLIENT_SECRET are defined in another go file, ignored by git, to avoid committing it to GitHub
     // They can be retrieve from Google Cloud Platform > APIs & Services > Credentials > OAuth2 Clients
-    oauth2Config = &oauth2.Config{
+    return &oauth2.Config{
         ClientID:     CLIENT_ID,
         ClientSecret: CLIENT_SECRET,
         RedirectURL:  redirectURL,
@@ -63,7 +82,7 @@ func oauth2CallBackHandler(w http.ResponseWriter, r *http.Request) {
 func getOAuth2Link(w http.ResponseWriter, r *http.Request) {
     fmt.Println("Getting the OAuth2 token via link")
 
-    authURL := oauth2Config.AuthCodeURL(stateString, oauth2.AccessTypeOffline)
+    authURL := getConfig().AuthCodeURL(getStateString(true), oauth2.AccessTypeOffline) 
     
     w.Header().Set("Content-Type", "text/html; charset=utf-8")    
     fmt.Fprint(w, "Go to the following link and sign in to your account: </br><a href="+ authURL+">Click link </a>")
@@ -72,10 +91,8 @@ func getOAuth2Link(w http.ResponseWriter, r *http.Request) {
 
 func updateTokenCookies(w http.ResponseWriter, r *http.Request){
     fmt.Println("get authcode")
-    if r.FormValue("state") != stateString{
+    if r.FormValue("state") != getStateString(false) {
         log.Fatalf("The state is invalid, closing the session")
-    } else{
-        initializeStateString() //update the state parameter for the next authentication
     }
 
     authCode := r.FormValue("code")
@@ -95,7 +112,7 @@ func updateTokenCookies(w http.ResponseWriter, r *http.Request){
 
     http.SetCookie(w, &cookie)
     var err error    
-    tokenCookies[cookieId], err = oauth2Config.Exchange(ctx, authCode)
+    tokenCookies[cookieId], err = getConfig().Exchange(ctx, authCode)
     if err != nil {
         fmt.Println("Error with authorization code exchange : " +err.Error())
         fmt.Println("\nAuthorization code is : "+authCode)
@@ -109,7 +126,7 @@ func updateTokenCookies(w http.ResponseWriter, r *http.Request){
 func startCalendarService(token *oauth2.Token) *calendar.Service{
     fmt.Println("Start Calendar Service")
 
-    client:= oauth2Config.Client(context.Background(), token)
+    client:= getConfig().Client(context.Background(), token)
     fmt.Println("Client created")
 
     calendarService, err := calendar.New(client)
