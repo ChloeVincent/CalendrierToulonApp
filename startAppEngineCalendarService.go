@@ -1,24 +1,19 @@
 package main
 
 import (
-        "fmt"
-        "log"
-        "net/http"
-        "context"
-        "math/rand"
-        "strconv"
+    "fmt"
+    "log"
+    "net/http"
+    "context"
+    "math/rand"
+    "strconv"
 
-
-        "google.golang.org/appengine"
-        "golang.org/x/oauth2"
-        "golang.org/x/oauth2/google"
-        "google.golang.org/api/calendar/v3"
+    "golang.org/x/oauth2"
+    "golang.org/x/oauth2/google"
+    "google.golang.org/api/calendar/v3"
 )
 
-var (
-    tokenCookies map[string]*oauth2.Token;
-    stateString string;
-)
+var stateString string;
 
 func getStateString(updateString bool) string{
     if updateString {
@@ -26,11 +21,6 @@ func getStateString(updateString bool) string{
     }
     return stateString
 }
-
-func init(){
-    tokenCookies = make(map[string]*oauth2.Token)
-}
-
 
 // initializer function to avoid changes on what should be a constant
 // (if it was possible in go)
@@ -51,18 +41,8 @@ func getConfig() *oauth2.Config{
 }
 
 // Connect with OAuth2
-func getLocalToken(w http.ResponseWriter, r *http.Request) *oauth2.Token {
-    cookie, err := r.Cookie("CookieId")
-    if err != nil{
-        fmt.Println("Could not retrieve the cookie: "+err.Error())
-        return nil
-    } else{
-        cookieId:= cookie.Value
-        return tokenCookies[cookieId];
-    }
-}
 
-
+// Login: get local token (=from cookie) or request an authentication link
 func loginHandler(w http.ResponseWriter, r *http.Request) {
     if getLocalToken(w,r) != nil {
         fmt.Println("Already logged in : a cookie exists for this user")
@@ -73,21 +53,40 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
     } 
 }
 
-func oauth2CallBackHandler(w http.ResponseWriter, r *http.Request) {
-    updateTokenCookies(w,r)
-    http.Redirect(w, r, "/", http.StatusSeeOther)
+// local token + get cookie
+func getCookie(cookieName string , r *http.Request) (string, error) {
+    cookie, err := r.Cookie(cookieName)
+    if err != nil{
+        fmt.Println("Could not retrieve the cookie for "+cookieName+": "+err.Error())
+        return "", err 
+    } else{
+        cookieValue:= cookie.Value
+        //fmt.Println("A cookie exists, the token cookie is: '"+ cookieValue+"'")
+        return cookieValue, nil;
+    }
 }
 
+func getLocalToken(w http.ResponseWriter, r *http.Request) *oauth2.Token {
+    var token  *oauth2.Token;
 
-func getOAuth2Link(w http.ResponseWriter, r *http.Request) {
-    fmt.Println("Getting the OAuth2 token via link")
+    accessToken, err1 := getCookie("AccessToken", r)
+    refreshToken, err2 := getCookie("RefreshToken", r)
+    tokenType, err3 := getCookie("TokenType", r)
+    if err1 ==nil && err2 == nil && err3 == nil {
+        token = &oauth2.Token{AccessToken: accessToken, RefreshToken: refreshToken, TokenType: tokenType}    
+    }
+    return token;
 
-    authURL := getConfig().AuthCodeURL(getStateString(true), oauth2.AccessTypeOffline) 
-    
-    w.Header().Set("Content-Type", "text/html; charset=utf-8")    
-    fmt.Fprint(w, "Go to the following link and sign in to your account: </br><a href="+ authURL+">Click link </a>")
 }
 
+// get authentication link + call back handler that updates the cookies
+func setCookie(w http.ResponseWriter, cookieName string, cookieValue string){
+    cookie := http.Cookie{Name : cookieName, 
+                           Value : cookieValue,
+                           Path: "/"}
+
+    http.SetCookie(w, &cookie)
+}
 
 func updateTokenCookies(w http.ResponseWriter, r *http.Request){
     fmt.Println("get authcode")
@@ -102,27 +101,39 @@ func updateTokenCookies(w http.ResponseWriter, r *http.Request){
     }
 
     fmt.Println("About to exchange authorization code for token")
-
-    ctx := appengine.NewContext(r)
-
-    cookieId := strconv.FormatInt(rand.Int63(),10)
-    cookie := http.Cookie{Name : "CookieId", 
-                           Value : cookieId,
-                           Path: "/"}
-
-    http.SetCookie(w, &cookie)
-    var err error    
-    tokenCookies[cookieId], err = getConfig().Exchange(ctx, authCode)
+    token, err := getConfig().Exchange(context.Background(), authCode)
     if err != nil {
         fmt.Println("Error with authorization code exchange : " +err.Error())
         fmt.Println("\nAuthorization code is : "+authCode)
         fmt.Println("Please reload the page and follow the link provided")
         return
     }
+    fmt.Println("Token exchanged")
 
-    fmt.Println("token exchanged")
+    setCookie(w, "AccessToken", token.AccessToken)
+    setCookie(w, "RefreshToken", token.RefreshToken)
+    setCookie(w, "TokenType", token.TokenType)
+    fmt.Println("Cookies saved")
 }
 
+func oauth2CallBackHandler(w http.ResponseWriter, r *http.Request) {
+    updateTokenCookies(w,r)
+    http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func getOAuth2Link(w http.ResponseWriter, r *http.Request) {
+    fmt.Println("Getting the OAuth2 token via link")
+
+    authURL := getConfig().AuthCodeURL(getStateString(true), oauth2.AccessTypeOffline) 
+    
+    w.Header().Set("Content-Type", "text/html; charset=utf-8")    
+    fmt.Fprint(w, "Go to the following link and sign in to your account: </br><a href="+ authURL+">Click link </a>")
+}
+
+
+
+
+// starts and returns calendar service with oauth2 token
 func startCalendarService(token *oauth2.Token) *calendar.Service{
     fmt.Println("Start Calendar Service")
 

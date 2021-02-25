@@ -1,17 +1,17 @@
 package main
 
 import (
-        "encoding/json"
-        "fmt"
-        "io/ioutil"
-        "log"
-        "net/http"
-        "os"
-        "context"
+    "encoding/json"
+    "fmt"
+    "io/ioutil"
+    "log"
+    "net/http"
+    "os"
+    "context"
 
-        "golang.org/x/oauth2"
-        "golang.org/x/oauth2/google"
-        "google.golang.org/api/calendar/v3"
+    "golang.org/x/oauth2"
+    "golang.org/x/oauth2/google"
+    "google.golang.org/api/calendar/v3"
 )
 
 // initializer function to avoid changes on what should be a constant
@@ -106,8 +106,7 @@ func oauth2CallBackHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func startCalendarService(token *oauth2.Token) *calendar.Service {
-    ctx := context.Background()
-    client := getConfig().Client(ctx, token)
+    client := getConfig().Client(context.Background(), token)
 
     calendarService, err := calendar.New(client)
     if err != nil {

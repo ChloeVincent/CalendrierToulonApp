@@ -1,20 +1,20 @@
 package main
 
 import (
-        "fmt"
-        "io"
-        "log"
-        "net/http"
-        "os"
-        "time"
-        "html/template"
-        "strings"
-        "strconv"
-        "bufio"
-        "sync"
-        "context"
+    "fmt"
+    "io"
+    "log"
+    "net/http"
+    "os"
+    "time"
+    "html/template"
+    "strings"
+    "strconv"
+    "bufio"
+    "sync"
+    "context"
 
-        "google.golang.org/api/calendar/v3"
+    "google.golang.org/api/calendar/v3"
 )
 
 type Month struct {  
@@ -115,8 +115,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
         http.Redirect(w, r, "/login/", http.StatusSeeOther)
         return
     }
-    var calendarService  *calendar.Service;
-    calendarService = startCalendarService(token)
+    
+    calendarService := startCalendarService(token)
 
     if calendarService == nil{
         log.Fatal("Calendar service was not initialized properly.")
@@ -125,10 +125,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
     fmap:= template.FuncMap{"Iterate": iterate,
                             "IsOccupied": func(day int, monthStr string) bool {
-                                        var month, _= strconv.Atoi(monthStr)
+                                        month, _:= strconv.Atoi(monthStr)
                                         return contains(OccupiedDaysList[month], day)},
                             "DayColor": func(day int, monthStr string) string {
-                                        var month, _= strconv.Atoi(monthStr)
+                                        month, _:= strconv.Atoi(monthStr)
                                         return getColor(OccupiedDaysList[month], day)},
                             }
     
@@ -245,12 +245,11 @@ func startHttpServer(wg *sync.WaitGroup) *http.Server{
 
 
 
-func stopHttpServer(wg *sync.WaitGroup, httpServer *http.Server, ctx context.Context){
+func stopHttpServer(wg *sync.WaitGroup, httpServer *http.Server){
     log.Printf("main: stopping HTTP server")
 
     // now close the server gracefully ("shutdown")
-    
-    if err := httpServer.Shutdown(ctx); err != nil {
+    if err := httpServer.Shutdown(context.Background()); err != nil {
         panic(err) // failure/timeout shutting down the server gracefully
     }
 
@@ -261,9 +260,6 @@ func stopHttpServer(wg *sync.WaitGroup, httpServer *http.Server, ctx context.Con
 }
 
 func main() {
-    ctx := context.Background()
-    
-
     wg := &sync.WaitGroup{}
     // start http server
     httpServer := startHttpServer(wg)
@@ -280,5 +276,5 @@ func main() {
         log.Fatal(err)
     } 
 
-      stopHttpServer(wg,httpServer, ctx)
+      stopHttpServer(wg,httpServer)
 }
