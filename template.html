@@ -6,8 +6,14 @@
 </head>
 <body>
 	<h1>Calendrier Toulon Indivision</h1>
-	<p></p>
+	<p>Montre le calendrier d'il y a 3 mois à 9 mois plus tard</p>
+	<div >
+	<div class="legend"><span class="day occupied" style="border-color: blue">X</span> confirmé</div>
+	<div class="legend"><span class="day occupied" style="border-color: orange">X</span> en attente de confirmation</div>
+	<div class="legend"><span class="day occupied" style="border-color: red">X</span> non confirmé</div>
+</div>
 
+	<p></p>
 {{range $month := .Months}}
     <div class="month">
     	{{$month.Name}}	
@@ -17,19 +23,29 @@
 			{{end }}
 
         	{{range $val := Iterate $month.Days }}
-	            {{if IsOccupied $val $month.Index }}
-	  				<span class="day occupied" style="border-color: {{DayColor $val $month.Index}};">{{ $val }} </span>
-	  			{{else}}
-	  				<span class="day">{{ $val }} </span>
-	  			{{end}}
+			<span class="day {{GetClass $val $month.Index}}" style="border-color: {{DayColor $val $month.Index}}; " >{{ $val }} </span>
+
 			{{end }}
 		</div>
     </div>
 {{end}}
+<p></p>
+<div class="lists">
+<div class="eventsList">
+	<h3>Occupation: </h3>
 
-{{range $event := .Events }}
+{{range $event := .OccupiedEvents }}
 	<p>  {{$event}}</p>
 {{end }}
-
+</div>
+<div class="jardin eventsList">
+	<h3>Jardin:</h3>
+	<div>
+		{{range $event := .JardinEvents }}
+		<p>  {{$event}}</p>
+		{{end }}
+	</div>
+</div>
+</div>
 </body>
 </html>

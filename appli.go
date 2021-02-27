@@ -29,16 +29,19 @@ type OccupiedPeriod struct {
     StartDay int
     EndDay int
     ColorId string
+    IsJardin bool
 }
 
 type OccupiedDay struct {  
     DayNumber int
     Color string
+    IsJardin bool
 }
 
 type TemplateArgs struct {
     Months []Month
-    Events []string
+    OccupiedEvents []string
+    JardinEvents []string
 }
 
 // initializer function to avoid changes on what should be a constant array
@@ -97,18 +100,40 @@ func contains(s []OccupiedDay, e int) bool {
     return false
 }
 
-func getColor(s []OccupiedDay, e int) string {
+func getOccupiedBorderColor(s []OccupiedDay, e int) string {
     for _, a := range s {
-        if a.DayNumber == e {
+        if a.DayNumber == e && !a.IsJardin {
             return a.Color
         }
     }
     return ""
 }
 
+func getClass(month []OccupiedDay, day int, isToday bool) string{
+    class:= ""
+    for _, d := range month {
+        if d.DayNumber == day {
+            if d.IsJardin{
+                class = class + " jardin"
+            } else {
+                if isToday{
+                    class = class + " today"
+                } else{
+                    class = class + " occupied"
+                }
+            }
+        }
+    }
+    if isToday{
+        class = class + " today"
+    }
+    return class
+}
+
 
 // Runs server
 func handler(w http.ResponseWriter, r *http.Request) {
+    fmt.Println("handler")
     token := getLocalToken(w,r)
     if token == nil{
         fmt.Println("No token was found, redirecting to login")
@@ -116,12 +141,12 @@ func handler(w http.ResponseWriter, r *http.Request) {
         return
     }
     
-    calendarService := startCalendarService(token)
+    calendarService := startCalendarService(w, token)
 
     if calendarService == nil{
         log.Fatal("Calendar service was not initialized properly.")
     }
-    OccupiedDaysList, events := refreshOccupiedDaysList(calendarService)
+    OccupiedDaysList, occupiedEvents, jardinEvents, now := refreshOccupiedDaysList(calendarService)
 
     fmap:= template.FuncMap{"Iterate": iterate,
                             "IsOccupied": func(day int, monthStr string) bool {
@@ -129,12 +154,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
                                         return contains(OccupiedDaysList[month], day)},
                             "DayColor": func(day int, monthStr string) string {
                                         month, _:= strconv.Atoi(monthStr)
-                                        return getColor(OccupiedDaysList[month], day)},
+                                        return getOccupiedBorderColor(OccupiedDaysList[month], day)},
+                            "GetClass": func(day int, monthStr string) string {
+                                        month, _:= strconv.Atoi(monthStr)
+                                        isToday := (time.Month(month) == now.Month()) && (day == now.Day())
+                                        return getClass(OccupiedDaysList[month], day, isToday)},
                             }
     
     t, _ := template.New("template.html").Funcs(fmap).ParseFiles("template.html")
-
-    t.Execute(w, TemplateArgs{getAllMonths(), events})
+    t.Execute(w, TemplateArgs{getAllMonths(), occupiedEvents, jardinEvents})
 }
 
 
@@ -149,16 +177,18 @@ func getYMD(startDate string)(int, int, int){
 
 func appendODL(OccupiedDaysList map[int][]OccupiedDay, period OccupiedPeriod) {
     for day := period.StartDay; day < period.EndDay; day ++{
-        OccupiedDaysList[period.Month]= append(OccupiedDaysList[period.Month], OccupiedDay{day, getColorIdDict()[period.ColorId]})
+        OccupiedDaysList[period.Month]= append(OccupiedDaysList[period.Month], 
+            OccupiedDay{day, getColorIdDict()[period.ColorId], period.IsJardin})
     }
 }
 
-func refreshOccupiedDaysList(calendarService  *calendar.Service) (map[int][]OccupiedDay, []string) {
+func refreshOccupiedDaysList(calendarService  *calendar.Service) (map[int][]OccupiedDay, []string, []string, time.Time) {
     OccupiedDaysList := make(map[int][]OccupiedDay)
-    var EventList []string
-    t := time.Now().Format(time.RFC3339)
+    var EventList, JardinList []string
+    tMin := time.Now().AddDate(-1, 9, 0).Format(time.RFC3339)
+    tMax := time.Now().AddDate(0, 9, 0).Format(time.RFC3339)
     events, err := calendarService.Events.List("primary").ShowDeleted(false).
-        SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
+        SingleEvents(true).TimeMin(tMin).TimeMax(tMax).OrderBy("startTime").Do()
     if err != nil {
         log.Fatalf("Unable to retrieve next ten of the user's events: %v", err)
     }
@@ -177,8 +207,10 @@ func refreshOccupiedDaysList(calendarService  *calendar.Service) (map[int][]Occu
             } else{
                 fmt.Printf("# %v (%v)\n", item.Summary, startDate)
 
-                y, m, d := getYMD(startDate)            
-                OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{d, colorIdDict[colorID]})
+                isJardin:= strings.HasPrefix(item.Summary, "jardin")
+
+                y, m, d := getYMD(startDate)
+                OccupiedDaysList[m]= append(OccupiedDaysList[m], OccupiedDay{d, colorIdDict[colorID], isJardin})
                 fmt.Printf("\tSTART DATE: year: %v, month: %v, day: %v \n", y, m, d)
 
                 endDate :=item.End.Date
@@ -187,29 +219,36 @@ func refreshOccupiedDaysList(calendarService  *calendar.Service) (map[int][]Occu
                     fmt.Printf("\tENDDATE: year: %v, month: %v, day: %v \n", endY, endM, endD)
                     
                     if m == endM{
-                        appendODL(OccupiedDaysList, OccupiedPeriod{m, d, endD, colorID})
+                        appendODL(OccupiedDaysList, OccupiedPeriod{m, d, endD, colorID, isJardin})
                         
                     } else{ 
-                        appendODL(OccupiedDaysList,OccupiedPeriod{m, d, 32, colorID})
+                        appendODL(OccupiedDaysList,OccupiedPeriod{m, d, 32, colorID, isJardin})
                         for month := m+1; month < endM; month ++{
-                            appendODL(OccupiedDaysList, OccupiedPeriod{month, 0, 32, colorID})
+                            appendODL(OccupiedDaysList, OccupiedPeriod{month, 0, 32, colorID, isJardin})
                         }
-                        appendODL(OccupiedDaysList, OccupiedPeriod{endM, 0, endD, colorID})
+                        appendODL(OccupiedDaysList, OccupiedPeriod{endM, 0, endD, colorID, isJardin})
                     }    
                 }
 
                 fmt.Printf("\tcolorID: '%v' aka %v \n",colorID, colorIdDict[colorID])
 
-                EventList = append(EventList, "Du "+startDate+" au "+endDate+ " : "+ item.Summary)
+                if isJardin{
+                    JardinList = append(JardinList, item.Summary + " ("+startDate+" -- "+endDate +")")
+                }else{
+                    EventList = append(EventList, "Du "+startDate+" au "+endDate+ " : "+ item.Summary)
+                }
                 // end foreach items
             }
         }
     }
 
     fmt.Println("-------------\nClick Enter to exit\n")
-    return OccupiedDaysList, EventList
+    return OccupiedDaysList, EventList, JardinList, time.Now()
 }
 
+func faviconHandler(w http.ResponseWriter, r *http.Request) {
+   http.ServeFile(w, r, "favicon.ico")
+}
 
 // start and stop Http server
 func startHttpServer(wg *sync.WaitGroup) *http.Server{
@@ -226,6 +265,7 @@ func startHttpServer(wg *sync.WaitGroup) *http.Server{
 
     http.Handle("/resources/", http.StripPrefix("/resources/", http.FileServer(http.Dir("resources")))) 
     http.HandleFunc("/", handler)
+    http.HandleFunc("/favicon.ico", faviconHandler)
     http.HandleFunc("/login/", loginHandler)
     http.HandleFunc("/oauth2CallBack/", oauth2CallBackHandler)
 

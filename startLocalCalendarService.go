@@ -105,7 +105,7 @@ func oauth2CallBackHandler(w http.ResponseWriter, r *http.Request) {
     http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func startCalendarService(token *oauth2.Token) *calendar.Service {
+func startCalendarService(w http.ResponseWriter, token *oauth2.Token) *calendar.Service {
     client := getConfig().Client(context.Background(), token)
 
     calendarService, err := calendar.New(client)
