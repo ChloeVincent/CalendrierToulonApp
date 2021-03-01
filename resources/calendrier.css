@@ -62,4 +62,18 @@ body {
 	vertical-align: top;
 }
 
+.header > h1{display:inline-block;
+	vertical-align: top;}
+
+.header > .button{
+	display:inline-block;
+	vertical-align: top;
+	float: right;
+	border-width: 2px;
+	border-style: solid;
+	border-radius: 8px;
+	padding: 5px;
+	margin: 20px;
+}
+
 

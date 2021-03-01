@@ -122,7 +122,7 @@ func updateTokenCookies(w http.ResponseWriter, r *http.Request){
     }
 
     fmt.Println("About to exchange authorization code for token")
-    token, err := getConfig().Exchange(context.Background(), authCode, oauth2.AccessTypeOffline)
+    token, err := getConfig().Exchange(context.Background(), authCode, oauth2.AccessTypeOffline, oauth2.ApprovalForce)
     if err != nil {
         fmt.Println("Error with authorization code exchange : " +err.Error())
         fmt.Println("\nAuthorization code is : "+authCode)
@@ -189,5 +189,24 @@ func startCalendarService(w http.ResponseWriter, token *oauth2.Token) *calendar.
     }
     fmt.Println("Calendar service started")
     return calendarService
+}
+
+// delete cookies handler
+
+func deleteCookie(w http.ResponseWriter, cookieName string){
+    cookie := http.Cookie{Name : cookieName, 
+                          Value : "",
+                          Path: "/",
+                          MaxAge: -1,
+                        }
+    http.SetCookie(w, &cookie)
+}
+
+func deleteCookiesHandler(w http.ResponseWriter, r *http.Request) {
+    deleteCookie(w, "AccessToken")
+    deleteCookie(w, "RefreshToken")
+    deleteCookie(w, "TokenType")
+    deleteCookie(w, "Expiry")
+    http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

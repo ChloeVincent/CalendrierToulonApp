@@ -114,3 +114,8 @@ func startCalendarService(w http.ResponseWriter, token *oauth2.Token) *calendar.
     }
     return calendarService
 }
+
+// delete cookies handler does nothing in this case
+func deleteCookiesHandler(w http.ResponseWriter, r *http.Request) {
+    http.Redirect(w, r, "/", http.StatusSeeOther)
+}

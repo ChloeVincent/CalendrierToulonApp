@@ -268,6 +268,7 @@ func startHttpServer(wg *sync.WaitGroup) *http.Server{
     http.HandleFunc("/favicon.ico", faviconHandler)
     http.HandleFunc("/login/", loginHandler)
     http.HandleFunc("/oauth2CallBack/", oauth2CallBackHandler)
+    http.HandleFunc("/deleteCookies/", deleteCookiesHandler)
 
 
     go func() {
