@@ -134,6 +134,7 @@ func getClass(month []OccupiedDay, day int, isToday bool) string{
 // Runs server
 func handler(w http.ResponseWriter, r *http.Request) {
     fmt.Println("handler")
+
     token := getLocalToken(w,r)
     if token == nil{
         fmt.Println("No token was found, redirecting to login")
@@ -146,7 +147,16 @@ func handler(w http.ResponseWriter, r *http.Request) {
     if calendarService == nil{
         log.Fatal("Calendar service was not initialized properly.")
     }
-    OccupiedDaysList, occupiedEvents, jardinEvents, now := refreshOccupiedDaysList(calendarService)
+    OccupiedDaysList, occupiedEvents, jardinEvents, now, err := refreshOccupiedDaysList(calendarService)
+
+    if err !=nil {
+        r.Header.Set("message", "There was an error when accessing the calendar "+
+                                "</br>Unable to retrieve the user's events: "+ 
+                                err.Error()+
+                                "</br>Try login in again</br></br>")
+        loginHandler(w,r)
+        return
+    }
 
     fmap:= template.FuncMap{"Iterate": iterate,
                             "IsOccupied": func(day int, monthStr string) bool {
@@ -182,15 +192,17 @@ func appendODL(OccupiedDaysList map[int][]OccupiedDay, period OccupiedPeriod) {
     }
 }
 
-func refreshOccupiedDaysList(calendarService  *calendar.Service) (map[int][]OccupiedDay, []string, []string, time.Time) {
+func refreshOccupiedDaysList(calendarService  *calendar.Service) (map[int][]OccupiedDay, []string, []string, time.Time, error) {
     OccupiedDaysList := make(map[int][]OccupiedDay)
     var EventList, JardinList []string
     tMin := time.Now().AddDate(-1, 9, 0).Format(time.RFC3339)
     tMax := time.Now().AddDate(0, 9, 0).Format(time.RFC3339)
     events, err := calendarService.Events.List("primary").ShowDeleted(false).
         SingleEvents(true).TimeMin(tMin).TimeMax(tMax).OrderBy("startTime").Do()
+
     if err != nil {
-        log.Fatalf("Unable to retrieve next ten of the user's events: %v", err)
+        log.Printf("Unable to retrieve the user's events: %v", err)
+        return nil,nil,nil,time.Now(),err
     }
 
     fmt.Println("Upcoming events:")
@@ -243,7 +255,7 @@ func refreshOccupiedDaysList(calendarService  *calendar.Service) (map[int][]Occu
     }
 
     fmt.Println("-------------\nClick Enter to exit\n")
-    return OccupiedDaysList, EventList, JardinList, time.Now()
+    return OccupiedDaysList, EventList, JardinList, time.Now(), nil
 }
 
 func faviconHandler(w http.ResponseWriter, r *http.Request) {
@@ -269,6 +281,7 @@ func startHttpServer(wg *sync.WaitGroup) *http.Server{
     http.HandleFunc("/login/", loginHandler)
     http.HandleFunc("/oauth2CallBack/", oauth2CallBackHandler)
     http.HandleFunc("/deleteCookies/", deleteCookiesHandler)
+    http.HandleFunc("/goToAuthentication/", goToAuthenticationHandler)
 
 
     go func() {

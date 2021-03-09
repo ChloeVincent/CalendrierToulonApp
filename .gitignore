@@ -2,10 +2,10 @@ appli
 appli.exe
 src/
 pkg/
-*credentials.json
-*token.json
+*.json
 oauth2Credentials.txt
 client_secret*
+notes.txt
 credentialsConst.go
 go.sum
 logo.png

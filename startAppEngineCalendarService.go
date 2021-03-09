@@ -8,10 +8,14 @@ import (
     "math/rand"
     "strconv"
     "time"
+    "io"
+    "os"
+    "io/ioutil"
 
     "golang.org/x/oauth2"
     "golang.org/x/oauth2/google"
     "google.golang.org/api/calendar/v3"
+    "cloud.google.com/go/storage"
 )
 
 var stateString string;
@@ -46,8 +50,12 @@ func getConfig() *oauth2.Config{
 // Login: get local token (=from cookie) or request an authentication link
 func loginHandler(w http.ResponseWriter, r *http.Request) {
     fmt.Println("loginHandler")
+    message:="NA"
+    if len(r.Header.Values("message")) >0{
+        message =r.Header.Values("message")[0]
+    }
 
-    if getLocalToken(w,r) != nil {
+    if getLocalToken(w,r) != nil && message == "NA" {
         fmt.Println("Already logged in : a cookie exists for this user")
         http.Redirect(w, r, "/", http.StatusSeeOther)
 
@@ -70,11 +78,49 @@ func getCookie(cookieName string , r *http.Request) (string, error) {
     }
 }
 
+// downloadFile downloads the file notes.txt which contains the refresh token on the server
+func downloadFile(w io.Writer) ([]byte, error) {
+        bucket := os.Getenv("BUCKET_NAME")
+        object := "notes.txt"
+        ctx := context.Background()
+        client, err := storage.NewClient(ctx)
+        if err != nil {
+                return nil, fmt.Errorf("storage.NewClient: %v", err)
+        }
+        defer client.Close()
+
+        ctx, cancel := context.WithTimeout(ctx, time.Second*50)
+        defer cancel()
+
+        rc, err := client.Bucket(bucket).Object(object).NewReader(ctx)
+        if err != nil {
+                return nil, fmt.Errorf("Object(%q).NewReader: %v", object, err)
+        }
+        defer rc.Close()
+
+        data, err := ioutil.ReadAll(rc)
+        if err != nil {
+                return nil, fmt.Errorf("ioutil.ReadAll: %v", err)
+        }
+        fmt.Println("File "+object+" downloaded from bucket "+ bucket)
+        return data, nil
+}
+
+
+
+func getRefreshToken(w http.ResponseWriter,r *http.Request) (string, error){
+    refreshToken, err := downloadFile(w)
+    if err !=nil{
+        fmt.Println(err.Error())
+    }
+    return string(refreshToken), err
+}
+
 func getLocalToken(w http.ResponseWriter, r *http.Request) *oauth2.Token {
     var token  *oauth2.Token;
 
     accessToken, err1 := getCookie("AccessToken", r)
-    refreshToken, err2 := getCookie("RefreshToken", r)
+    refreshToken, err2 := getRefreshToken(w,r)
     tokenType, err3 := getCookie("TokenType", r)
     expiry, _:= getCookie("Expiry", r)
     if err1 ==nil && err2 == nil && err3 == nil {
@@ -102,9 +148,38 @@ func setCookie(w http.ResponseWriter, cookieName string, cookieValue string){
     http.SetCookie(w, &cookie)
 }
 
+// setRefreshCookie uploads the refreshToken to the file notes.txt on the server
+func setRefreshCookie(w io.Writer, refreshToken string) error {
+    if refreshToken==""{
+        fmt.Println("Refresh token empty, not uploading to server")
+        return nil
+    }
+    bucket := os.Getenv("BUCKET_NAME")
+    object := "notes.txt"
+    ctx := context.Background()
+    client, err := storage.NewClient(ctx)
+    if err != nil {
+            return fmt.Errorf("storage.NewClient: %v", err)
+    }
+    defer client.Close()
+
+    ctx, cancel := context.WithTimeout(ctx, time.Second*50)
+    defer cancel()
+
+    // Upload an object with storage.Writer.
+    wc := client.Bucket(bucket).Object(object).NewWriter(ctx)
+    io.WriteString(wc, refreshToken)
+
+    if err := wc.Close(); err != nil {
+            return fmt.Errorf("Writer.Close: %v", err)
+    }
+    fmt.Println("File "+object+" uploaded to bucket "+bucket)
+    return nil
+}
+
 func saveTokenCookies(w http.ResponseWriter,token *oauth2.Token){
     setCookie(w, "AccessToken", token.AccessToken)
-    setCookie(w, "RefreshToken", token.RefreshToken)
+    setRefreshCookie(w, token.RefreshToken)
     setCookie(w, "TokenType", token.TokenType)
     setCookie(w, "Expiry", token.Expiry.Format(time.UnixDate))
 }
@@ -122,7 +197,7 @@ func updateTokenCookies(w http.ResponseWriter, r *http.Request){
     }
 
     fmt.Println("About to exchange authorization code for token")
-    token, err := getConfig().Exchange(context.Background(), authCode, oauth2.AccessTypeOffline, oauth2.ApprovalForce)
+    token, err := getConfig().Exchange(context.Background(), authCode, oauth2.AccessTypeOffline)
     if err != nil {
         fmt.Println("Error with authorization code exchange : " +err.Error())
         fmt.Println("\nAuthorization code is : "+authCode)
@@ -144,34 +219,16 @@ func oauth2CallBackHandler(w http.ResponseWriter, r *http.Request) {
 func getOAuth2Link(w http.ResponseWriter, r *http.Request) {
     fmt.Println("Getting the OAuth2 token via link")
     authURL := getConfig().AuthCodeURL(getStateString(true), oauth2.AccessTypeOffline) 
+
+    message:=""
+    if len(r.Header.Values("message")) >0{
+        message =r.Header.Values("message")[0]
+    }
     
-    w.Header().Set("Content-Type", "text/html; charset=utf-8")    
+    w.Header().Set("Content-Type", "text/html; charset=utf-8")
+    fmt.Fprint(w, message)  
     fmt.Fprint(w, "Go to the following link and sign in to your account: </br><a href="+ authURL+">Click link </a>")
 }
-
-
-// func checkAndUpdateToken(w http.ResponseWriter, token *oauth2.Token) *oauth2.Token {
-//     tokenSource := getConfig().TokenSource(oauth2.NoContext, token)
-//     newToken, err := tokenSource.Token()
-//     fmt.Println(token.AccessToken)
-//     fmt.Println(newToken.AccessToken)
-//     fmt.Println(token.RefreshToken)
-//     fmt.Println(newToken.RefreshToken)
-//     fmt.Println(token.TokenType)
-//     fmt.Println(newToken.TokenType)
-//     fmt.Println(token.Expiry)
-//     fmt.Println(newToken.Expiry)
-//     if err != nil {
-//         log.Fatalln(err)
-//     }
-
-//     if newToken.AccessToken != token.AccessToken {
-//         saveTokenCookies(w, newToken)
-//         log.Println("Saved new token:", newToken.AccessToken)
-//         return newToken
-//     }
-//     return token
-// }
 
 
 // starts and returns calendar service with oauth2 token
@@ -192,7 +249,6 @@ func startCalendarService(w http.ResponseWriter, token *oauth2.Token) *calendar.
 }
 
 // delete cookies handler
-
 func deleteCookie(w http.ResponseWriter, cookieName string){
     cookie := http.Cookie{Name : cookieName, 
                           Value : "",
@@ -210,3 +266,10 @@ func deleteCookiesHandler(w http.ResponseWriter, r *http.Request) {
     http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+
+// re authenticate
+func goToAuthenticationHandler(w http.ResponseWriter, r *http.Request) {
+    r.Header.Set("message", "The user requested a new authentication</br></br>")
+        loginHandler(w,r)
+        return
+    }

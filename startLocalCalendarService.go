@@ -119,3 +119,10 @@ func startCalendarService(w http.ResponseWriter, token *oauth2.Token) *calendar.
 func deleteCookiesHandler(w http.ResponseWriter, r *http.Request) {
     http.Redirect(w, r, "/", http.StatusSeeOther)
 }
+
+// go to authentication handler does nothing in this case
+func goToAuthenticationHandler(w http.ResponseWriter, r *http.Request) {
+    http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+

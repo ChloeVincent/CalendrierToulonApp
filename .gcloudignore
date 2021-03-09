@@ -35,10 +35,10 @@ pkg/
 src/
 
 # Credentials and token files
-*credentials.json
-*token.json
+*.json
 oauth2Credentials.txt
 client_secret*
+notes.txt
 
 # extra files
 logo.png
